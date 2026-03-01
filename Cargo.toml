@@ -1,0 +1,17 @@
+[package]
+name = "reduct-bridge"
+version = "0.1.0"
+edition = "2024"
+
+
+[dependencies]
+tokio = { version = "1.49.0", features = ["macros", "rt", "signal"] }
+async-trait = "0.1.89"
+toml = "1.0.3+spec-1.1.0"
+serde = { version = "1.0.228", features = ["derive"] }
+bytes = "1.11.1"
+reduct-rs = { version = "1.19.0", path = "../reduct-rs" }
+crossbeam = "0.8.4"
+anyhow = "1.0.102"
+log = "0.4.28"
+env_logger = "0.11.8"

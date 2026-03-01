@@ -39,7 +39,7 @@ impl RemoteInstanceLauncher for ReductInstance {
             log::debug!("Reduct worker thread started for {}", cfg.url);
             while let Ok(message) = rx.recv() {
                 if matches!(message, RemoteMessage::Stop) {
-                    log::info!("Stop message received, shutting down Reduct worker");
+                    info!("Stop message received, shutting down Reduct worker");
                     break;
                 }
                 log::debug!("Received remote message: {:?}", message);
