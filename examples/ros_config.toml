@@ -1,9 +1,3 @@
-# reduct-bridge
-ReductBridge bridges live robotics and IIoT data with long-term storage in ReductStore
-
-
-
-```toml
 [[remotes.reduct]]
 name = "local"
 url = "http://localhost:8333"
@@ -19,4 +13,3 @@ exclude_topics = ["/camera/image_raw/compressed"]
 remote = "local"
 static_labels = {source = "ros1", robot = "alpha"}
 dynamic_labels = { x-position = { source = "/odom/pose/position/x", scope = "*" } }
-```
