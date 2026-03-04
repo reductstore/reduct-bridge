@@ -25,7 +25,10 @@ impl RosInstance {
 
 #[async_trait]
 impl InputLauncher for RosInstance {
-    async fn launch(&self, remote_tx: Sender<RemoteMessage>) -> Result<Sender<InputMessage>, Error> {
+    async fn launch(
+        &self,
+        remote_tx: Sender<RemoteMessage>,
+    ) -> Result<Sender<InputMessage>, Error> {
         let cfg = self.cfg.clone();
         let (tx, rx) = crossbeam::channel::unbounded::<InputMessage>();
 

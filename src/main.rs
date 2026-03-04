@@ -1,5 +1,5 @@
-mod remote;
 mod input;
+mod remote;
 
 use anyhow::Context;
 use log::info;

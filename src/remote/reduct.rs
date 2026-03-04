@@ -30,9 +30,7 @@ impl RemoteInstanceLauncher for ReductInstance {
         let (tx, rx) = crossbeam::channel::unbounded::<RemoteMessage>();
         info!(
             "Launching Reduct remote '{}' bucket '{}' with prefix '{}'",
-            cfg.url,
-            cfg.bucket,
-            cfg.prefix
+            cfg.url, cfg.bucket, cfg.prefix
         );
 
         std::thread::spawn(move || {
