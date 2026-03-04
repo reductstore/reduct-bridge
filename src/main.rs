@@ -1,3 +1,4 @@
+mod cfg;
 mod input;
 mod remote;
 
