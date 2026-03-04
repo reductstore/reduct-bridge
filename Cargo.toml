@@ -5,12 +5,13 @@ edition = "2024"
 
 
 [features]
-default = ["ros1"]
+default = ["ros1", "shell"]
 ros1 = []
+shell = []
 
 
 [dependencies]
-tokio = { version = "1.49.0", features = ["macros", "rt", "signal", "sync"] }
+tokio = { version = "1.49.0", features = ["macros", "rt", "signal", "sync", "time"] }
 async-trait = "0.1.89"
 toml = "1.0.3+spec-1.1.0"
 serde = { version = "1.0.228", features = ["derive"] }

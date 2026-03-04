@@ -9,23 +9,23 @@ use tokio::sync::mpsc::{Sender, channel};
 const CHANNEL_SIZE: usize = 1024;
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct InputConfig {
+pub struct Ros1Config {
     pub uri: String,
     pub node_name: String,
 }
 
-pub struct RosInstance {
-    cfg: InputConfig,
+pub struct Ros1Instance {
+    cfg: Ros1Config,
 }
 
-impl RosInstance {
-    pub fn new(cfg: InputConfig) -> Self {
+impl Ros1Instance {
+    pub fn new(cfg: Ros1Config) -> Self {
         Self { cfg }
     }
 }
 
 #[async_trait]
-impl InputLauncher for RosInstance {
+impl InputLauncher for Ros1Instance {
     async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<Sender<Message>, Error> {
         let cfg = self.cfg.clone();
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
