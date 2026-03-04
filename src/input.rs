@@ -1,25 +1,19 @@
 #[cfg(feature = "ros1")]
 mod ros;
 
+use crate::cfg::{find_named_entry, parse_named_entry, select_pipeline_target};
 use anyhow::{Context, Error, bail};
 use async_trait::async_trait;
 use crossbeam::channel::Sender;
 use log::{debug, info};
 use std::path::PathBuf;
 use toml::Value;
-
-use crate::cfg::{find_named_entry, parse_named_entry, select_pipeline_target};
-use crate::remote::RemoteMessage;
-
-#[derive(Debug)]
-pub enum InputMessage {
-    Stop,
-}
+use crate::message::Message;
 
 #[async_trait]
 pub trait InputLauncher: Send + Sync {
-    async fn launch(&self, remote_tx: Sender<RemoteMessage>)
-    -> Result<Sender<InputMessage>, Error>;
+    async fn launch(&self, remote_tx: Sender<Message>)
+    -> Result<Sender<Message>, Error>;
 }
 
 pub struct InputBuilder {
@@ -33,8 +27,8 @@ impl InputBuilder {
 
     pub async fn build(
         &self,
-        remote_tx: Sender<RemoteMessage>,
-    ) -> Result<Sender<InputMessage>, Error> {
+        remote_tx: Sender<Message>,
+    ) -> Result<Sender<Message>, Error> {
         debug!(
             "Reading config file for inputs: {}",
             self.config_path.display()

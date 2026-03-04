@@ -1,25 +1,17 @@
 mod reduct;
 
+use crate::cfg::{find_named_entry, parse_named_entry, select_pipeline_target};
 use anyhow::{Context, Error, bail};
 use async_trait::async_trait;
 use crossbeam::channel::Sender;
 use log::{debug, info};
 use std::path::PathBuf;
 use toml::Value;
-
-use crate::cfg::{find_named_entry, parse_named_entry, select_pipeline_target};
-
-#[derive(Debug)]
-pub enum RemoteMessage {
-    Record,
-    Attachment,
-    BlanketLabels,
-    Stop,
-}
+use crate::message::Message;
 
 #[async_trait]
 pub trait RemoteInstanceLauncher: Send + Sync {
-    async fn launch(&self) -> Result<Sender<RemoteMessage>, Error>;
+    async fn launch(&self) -> Result<Sender<Message>, Error>;
 }
 
 pub struct RemoteBuilder {
@@ -31,7 +23,7 @@ impl RemoteBuilder {
         Self { config_path }
     }
 
-    pub async fn build(&self) -> Result<Sender<RemoteMessage>, Error> {
+    pub async fn build(&self) -> Result<Sender<Message>, Error> {
         debug!("Reading config file: {}", self.config_path.display());
         let config_text = std::fs::read_to_string(&self.config_path).with_context(|| {
             format!("Failed to read config from {}", self.config_path.display())

@@ -1,10 +1,12 @@
 mod cfg;
 mod input;
 mod remote;
+mod message;
 
 use anyhow::Context;
 use log::info;
 use std::path::PathBuf;
+use crate::message::Message;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -34,8 +36,8 @@ async fn main() -> anyhow::Result<()> {
         .context("Failed to listen for Ctrl+C")?;
 
     info!("Ctrl+C received, sending stop messages");
-    let _ = input_tx.send(input::InputMessage::Stop);
-    let _ = remote_tx.send(remote::RemoteMessage::Stop);
+    let _ = input_tx.send(Message::Stop);
+    let _ = remote_tx.send(Message::Stop);
     info!("Shutdown complete");
 
     Ok(())

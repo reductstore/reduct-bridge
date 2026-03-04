@@ -3,9 +3,8 @@ use async_trait::async_trait;
 use crossbeam::channel::Sender;
 use log::{debug, info};
 use serde::Deserialize;
-
-use crate::input::{InputLauncher, InputMessage};
-use crate::remote::RemoteMessage;
+use crate::input::{InputLauncher};
+use crate::message::Message;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputConfig {
@@ -27,10 +26,10 @@ impl RosInstance {
 impl InputLauncher for RosInstance {
     async fn launch(
         &self,
-        remote_tx: Sender<RemoteMessage>,
-    ) -> Result<Sender<InputMessage>, Error> {
+        remote_tx: Sender<Message>,
+    ) -> Result<Sender<Message>, Error> {
         let cfg = self.cfg.clone();
-        let (tx, rx) = crossbeam::channel::unbounded::<InputMessage>();
+        let (tx, rx) = crossbeam::channel::unbounded::<Message>();
 
         info!(
             "Launching ROS input '{}' with uri '{}'",
@@ -41,7 +40,7 @@ impl InputLauncher for RosInstance {
             let _ = remote_tx;
 
             while let Ok(message) = rx.recv() {
-                if matches!(message, InputMessage::Stop) {
+                if matches!(message, Message::Stop) {
                     info!("Stop message received, shutting down ROS worker");
                     break;
                 }
