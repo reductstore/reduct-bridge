@@ -1,12 +1,15 @@
 mod cfg;
 mod input;
-mod remote;
 mod message;
+mod pipeline;
+mod remote;
 
+use crate::cfg::parse_config_file;
+use crate::input::InputBuilder;
+use crate::pipeline::PipelineBuilder;
+use crate::remote::RemoteBuilder;
 use anyhow::Context;
 use log::info;
-use std::path::PathBuf;
-use crate::message::Message;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -18,17 +21,13 @@ async fn main() -> anyhow::Result<()> {
         .nth(1)
         .context("Usage: reduct-bridge <path-to-config.toml>")?;
     info!("Starting reduct-bridge with config: {}", config_path);
-    let config_path = PathBuf::from(config_path);
 
-    let remote_tx = remote::RemoteBuilder::new(config_path.clone())
-        .build()
-        .await?;
-    info!("Remote launcher started");
+    let config = parse_config_file(&config_path)?;
 
-    let input_tx = input::InputBuilder::new(config_path)
-        .build(remote_tx.clone())
+    let runtime = PipelineBuilder::new()
+        .build(&config, &InputBuilder::new(), &RemoteBuilder::new())
         .await?;
-    info!("Input launcher started");
+    info!("Pipeline runtime started");
 
     info!("Waiting for Ctrl+C");
     tokio::signal::ctrl_c()
@@ -36,8 +35,7 @@ async fn main() -> anyhow::Result<()> {
         .context("Failed to listen for Ctrl+C")?;
 
     info!("Ctrl+C received, sending stop messages");
-    let _ = input_tx.send(Message::Stop);
-    let _ = remote_tx.send(Message::Stop);
+    runtime.stop().await;
     info!("Shutdown complete");
 
     Ok(())

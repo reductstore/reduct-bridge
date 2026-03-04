@@ -1,5 +1,6 @@
 use anyhow::{Context, Error, bail};
 use serde::{Deserialize, de::DeserializeOwned};
+use std::path::Path;
 use toml::{Value, value::Table};
 
 #[derive(Debug, Deserialize)]
@@ -8,30 +9,6 @@ struct NamedConfig<T> {
     name: String,
     #[serde(flatten)]
     config: T,
-}
-
-pub fn select_pipeline_target<'a>(config: &'a Value, key: &str) -> Result<&'a str, Error> {
-    let pipelines = config
-        .get("pipelines")
-        .and_then(Value::as_table)
-        .context("Missing 'pipelines' in configuration")?;
-
-    for pipeline_group in pipelines.values() {
-        if let Some(entries) = pipeline_group.as_array() {
-            for entry in entries {
-                if let Some(value) = entry.get(key).and_then(Value::as_str) {
-                    return Ok(value);
-                }
-            }
-            continue;
-        }
-
-        if let Some(value) = pipeline_group.get(key).and_then(Value::as_str) {
-            return Ok(value);
-        }
-    }
-
-    bail!("Missing '{key}' in pipeline configuration")
 }
 
 pub fn find_named_entry<'a>(
@@ -73,4 +50,13 @@ pub fn parse_named_entry<T: DeserializeOwned>(entry_table: &Table) -> Result<T, 
         .try_into()
         .context("Failed to deserialize named section entry")?;
     Ok(named.config)
+}
+
+pub fn parse_config_file(path: impl AsRef<Path>) -> Result<Value, Error> {
+    let path = path.as_ref();
+    let config_text = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read config from {}", path.display()))?;
+    let config: Value = toml::from_str(&config_text)
+        .with_context(|| format!("Failed to parse TOML config from {}", path.display()))?;
+    Ok(config)
 }

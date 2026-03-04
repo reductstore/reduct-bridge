@@ -18,7 +18,7 @@ uri = "http://localhost:11311"
 node_name = "reduct-bridge"
 
 
-[[pipelines.ros1]]
+[[pipelines]]
 name = "telemetry"
 include_topics = ["/camera/*", "/lidar/points"]
 exclude_topics = ["/camera/image_raw/compressed"]

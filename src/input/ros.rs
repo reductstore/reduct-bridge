@@ -1,10 +1,12 @@
+use crate::input::InputLauncher;
+use crate::message::Message;
 use anyhow::Error;
 use async_trait::async_trait;
-use crossbeam::channel::Sender;
-use log::{debug, info};
+use log::{debug, info, warn};
 use serde::Deserialize;
-use crate::input::{InputLauncher};
-use crate::message::Message;
+use tokio::sync::mpsc::{Sender, channel};
+
+const CHANNEL_SIZE: usize = 1024;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputConfig {
@@ -24,22 +26,25 @@ impl RosInstance {
 
 #[async_trait]
 impl InputLauncher for RosInstance {
-    async fn launch(
-        &self,
-        remote_tx: Sender<Message>,
-    ) -> Result<Sender<Message>, Error> {
+    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<Sender<Message>, Error> {
         let cfg = self.cfg.clone();
-        let (tx, rx) = crossbeam::channel::unbounded::<Message>();
+        let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
 
         info!(
             "Launching ROS input '{}' with uri '{}'",
             cfg.node_name, cfg.uri
         );
-        std::thread::spawn(move || {
-            debug!("ROS worker thread started for {}", cfg.node_name);
-            let _ = remote_tx;
+        tokio::spawn(async move {
+            debug!("ROS worker task started for {}", cfg.node_name);
 
-            while let Ok(message) = rx.recv() {
+            while let Some(message) = rx.recv().await {
+                if let Err(err) = pipeline_tx.send(message.clone()).await {
+                    warn!(
+                        "Failed to forward message from ROS input '{}' to pipeline: {}",
+                        cfg.node_name, err
+                    );
+                }
+
                 if matches!(message, Message::Stop) {
                     info!("Stop message received, shutting down ROS worker");
                     break;

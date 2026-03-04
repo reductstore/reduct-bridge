@@ -1,46 +1,27 @@
 mod reduct;
 
-use crate::cfg::{find_named_entry, parse_named_entry, select_pipeline_target};
-use anyhow::{Context, Error, bail};
-use async_trait::async_trait;
-use crossbeam::channel::Sender;
-use log::{debug, info};
-use std::path::PathBuf;
-use toml::Value;
+use crate::cfg::{find_named_entry, parse_named_entry};
 use crate::message::Message;
+use anyhow::{Error, bail};
+use async_trait::async_trait;
+use log::debug;
+use tokio::sync::mpsc::Sender;
+use toml::Value;
 
 #[async_trait]
 pub trait RemoteInstanceLauncher: Send + Sync {
     async fn launch(&self) -> Result<Sender<Message>, Error>;
 }
 
-pub struct RemoteBuilder {
-    config_path: PathBuf,
-}
+pub struct RemoteBuilder;
 
 impl RemoteBuilder {
-    pub fn new(config_path: PathBuf) -> Self {
-        Self { config_path }
+    pub fn new() -> Self {
+        Self
     }
 
-    pub async fn build(&self) -> Result<Sender<Message>, Error> {
-        debug!("Reading config file: {}", self.config_path.display());
-        let config_text = std::fs::read_to_string(&self.config_path).with_context(|| {
-            format!("Failed to read config from {}", self.config_path.display())
-        })?;
-
-        debug!("Parsing TOML configuration");
-        let config: Value = toml::from_str(&config_text).with_context(|| {
-            format!(
-                "Failed to parse TOML config from {}",
-                self.config_path.display()
-            )
-        })?;
-
-        let remote_name = select_pipeline_target(&config, "remote")?;
-        info!("Selected remote from pipeline config: {}", remote_name);
-
-        let (remote_type, remote_table) = find_named_entry(&config, "remotes", remote_name)?;
+    pub async fn build(&self, config: &Value, remote_name: &str) -> Result<Sender<Message>, Error> {
+        let (remote_type, remote_table) = find_named_entry(config, "remotes", remote_name)?;
         debug!(
             "Selected remote '{}' from dynamic section type '{}'",
             remote_name, remote_type
