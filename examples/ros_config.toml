@@ -15,8 +15,13 @@ node_name = "reduct-bridge"
 [[inputs.shell]]
 name = "shell-local"
 repeat_interval = 10
-command = "echo 'Payload,text/plain,input=shell'"
-
+command = "echo \"Payload, $(date --rfc-3339=ns)\""
+entry_name = "shell_input"
+content_type = "text/plain"
+labels = [
+    { regex = "Payload, (.*)", labels = { timestamp = "$1" } },
+    { static = { source = "shell_command" } }
+]
 
 
 [[pipelines]]
@@ -24,12 +29,12 @@ name = "telemetry"
 remote = "local"
 input = "ros-local"
 
-include_topics = ["/camera/*", "/lidar/points"]
-exclude_topics = ["/camera/image_raw/compressed"]
-static_labels = {source = "ros1", robot = "alpha"}
-dynamic_labels = { x-position = { source = "/odom/pose/position/x", scope = "*" } }
 
 [[pipelines]]
 name = "shell_pipeline"
 remote = "local"
 input = "shell-local"
+labels = [
+    { static = { source = "shell_pipeline", to = "*" } },
+    { from = "shell_input", labels = [ "timestamp" ], to = "*" }
+]

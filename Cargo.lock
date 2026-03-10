@@ -1085,6 +1085,7 @@ dependencies = [
  "env_logger",
  "log",
  "reduct-rs",
+ "regex",
  "serde",
  "tokio",
  "toml",

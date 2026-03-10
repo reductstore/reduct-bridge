@@ -17,6 +17,17 @@ name = "ros-local"
 uri = "http://localhost:11311"
 node_name = "reduct-bridge"
 
+[[inputs.shell]]
+name = "shell-local"
+repeat_interval = 10
+command = "echo \"Payload, $(date --rfc-3339=ns)\""
+entry_name = "shell_input"
+content_type = "text/plain"
+labels = [
+    { regex = "Payload, (.*)", labels = { timestamp = "$1" } },
+    { static = { source = "shell_command" } }
+]
+
 
 [[pipelines]]
 name = "telemetry"

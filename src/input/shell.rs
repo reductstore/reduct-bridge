@@ -1,8 +1,9 @@
 use crate::input::InputLauncher;
 use crate::message::{Message, Record};
-use anyhow::{Error, Result, anyhow, bail};
+use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
+use regex::{Captures, Regex};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::process::Command;
@@ -15,6 +16,34 @@ const CHANNEL_SIZE: usize = 1024;
 pub struct ShellConfig {
     pub repeat_interval: u64,
     pub command: String,
+    pub entry_name: String,
+    #[serde(default)]
+    pub content_type: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<ShellLabelRule>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ShellLabelRule {
+    Regex {
+        regex: String,
+        labels: HashMap<String, String>,
+    },
+    Static {
+        r#static: HashMap<String, String>,
+    },
+}
+
+#[derive(Debug, Clone)]
+enum PreparedShellLabelRule {
+    Regex {
+        regex: Regex,
+        labels: HashMap<String, String>,
+    },
+    Static {
+        labels: HashMap<String, String>,
+    },
 }
 
 pub struct ShellInstance {
@@ -34,36 +63,101 @@ impl ShellInstance {
         )
     }
 
-    fn parse_record_line(line: &str) -> Result<Record> {
-        let mut fields = line.split(',').map(str::trim);
-        let content = fields
-            .next()
-            .ok_or_else(|| anyhow!("missing content field"))?;
-        if content.is_empty() {
-            bail!("content field must not be empty");
+    fn prepare_label_rules(cfg: &ShellConfig) -> Result<Vec<PreparedShellLabelRule>> {
+        let mut prepared_rules = Vec::with_capacity(cfg.labels.len());
+        for rule in &cfg.labels {
+            match rule {
+                ShellLabelRule::Regex { regex, labels } => {
+                    let compiled = Regex::new(regex).map_err(|err| {
+                        anyhow::anyhow!("invalid shell label regex '{}': {}", regex, err)
+                    })?;
+                    prepared_rules.push(PreparedShellLabelRule::Regex {
+                        regex: compiled,
+                        labels: labels.clone(),
+                    });
+                }
+                ShellLabelRule::Static { r#static } => {
+                    prepared_rules.push(PreparedShellLabelRule::Static {
+                        labels: r#static.clone(),
+                    });
+                }
+            }
         }
-        let content_type = fields
-            .next();
+        Ok(prepared_rules)
+    }
+
+    fn substitute_captures(template: &str, captures: &Captures<'_>) -> String {
+        let mut out = String::with_capacity(template.len());
+        let bytes = template.as_bytes();
+        let mut i = 0usize;
+
+        while i < bytes.len() {
+            if bytes[i] == b'$' {
+                let mut j = i + 1;
+                while j < bytes.len() && bytes[j].is_ascii_digit() {
+                    j += 1;
+                }
+                if j > i + 1 {
+                    let idx = template[i + 1..j].parse::<usize>().ok();
+                    if let Some(value) = idx.and_then(|k| captures.get(k).map(|m| m.as_str())) {
+                        out.push_str(value);
+                    }
+                    i = j;
+                    continue;
+                }
+            }
+
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+
+        out
+    }
+
+    fn build_labels(
+        line: &str,
+        prepared_rules: &[PreparedShellLabelRule],
+    ) -> HashMap<String, String> {
         let mut labels = HashMap::new();
-        for label in fields {
-            if label.is_empty() {
-                continue;
+
+        for rule in prepared_rules {
+            match rule {
+                PreparedShellLabelRule::Regex {
+                    regex,
+                    labels: template_labels,
+                } => {
+                    if let Some(captures) = regex.captures(line) {
+                        for (key, value) in template_labels {
+                            labels.insert(key.clone(), Self::substitute_captures(value, &captures));
+                        }
+                    }
+                }
+                PreparedShellLabelRule::Static {
+                    labels: static_labels,
+                } => {
+                    for (key, value) in static_labels {
+                        labels.insert(key.clone(), value.clone());
+                    }
+                }
             }
-            let (key, value) = label
-                .split_once('=')
-                .ok_or_else(|| anyhow!("invalid label '{}', expected key=value", label))?;
-            let key = key.trim();
-            let value = value.trim();
-            if key.is_empty() {
-                bail!("label key must not be empty");
-            }
-            labels.insert(key.to_string(), value.to_string());
+        }
+
+        labels
+    }
+
+    fn parse_record_line(
+        line: &str,
+        cfg: &ShellConfig,
+        prepared_rules: &[PreparedShellLabelRule],
+    ) -> Result<Record> {
+        if line.is_empty() {
+            bail!("content field must not be empty");
         }
 
         Ok(Record {
-            content: content.to_string().into(),
-            content_type: content_type.map(str::to_string),
-            labels,
+            content: line.to_string().into(),
+            content_type: cfg.content_type.clone(),
+            labels: Self::build_labels(line, prepared_rules),
         })
     }
 }
@@ -75,10 +169,14 @@ impl InputLauncher for ShellInstance {
         if cfg.repeat_interval == 0 {
             bail!("Shell input repeat_interval must be greater than 0 seconds");
         }
+        if cfg.entry_name.trim().is_empty() {
+            bail!("Shell input entry_name must not be empty");
+        }
+        let prepared_label_rules = Self::prepare_label_rules(&cfg)?;
 
         info!(
-            "Launching shell input command every {}s: {}",
-            cfg.repeat_interval, cfg.command
+            "Launching shell input command every {}s for entry '{}' with command: {}",
+            cfg.repeat_interval, cfg.entry_name, cfg.command
         );
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
         tokio::spawn(async move {
@@ -120,7 +218,7 @@ impl InputLauncher for ShellInstance {
                             let stdout = String::from_utf8_lossy(&output.stdout);
                             let mut sent_records = 0usize;
                             for line in stdout.lines().map(str::trim).filter(|line| !line.is_empty()) {
-                                match Self::parse_record_line(line) {
+                                match Self::parse_record_line(line, &cfg, &prepared_label_rules) {
                                     Ok(record) => {
                                         if let Err(err) = pipeline_tx.send(Message::Record(record)).await {
                                             warn!("Failed to forward shell record message to pipeline: {}", err);
@@ -130,7 +228,7 @@ impl InputLauncher for ShellInstance {
                                     }
                                     Err(err) => {
                                         warn!(
-                                            "Failed to parse shell output '{}': {}. Expected '<content>,content_type,label=value,...'",
+                                            "Failed to parse shell output '{}': {}. Expected one content line per record; metadata comes from config",
                                             line,
                                             err
                                         );
