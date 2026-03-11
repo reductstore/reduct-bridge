@@ -3,7 +3,7 @@ mod ros1;
 #[cfg(feature = "shell")]
 mod shell;
 
-use crate::cfg::{find_named_entry, parse_named_entry};
+use crate::cfg::{find_keyed_entry, parse_entry};
 use crate::message::Message;
 use anyhow::{Error, bail};
 use async_trait::async_trait;
@@ -29,7 +29,7 @@ impl InputBuilder {
         input_name: &str,
         pipeline_tx: Sender<Message>,
     ) -> Result<Sender<Message>, Error> {
-        let (input_type, input_table) = find_named_entry(config, "inputs", input_name)?;
+        let (input_type, input_table) = find_keyed_entry(config, "inputs", input_name)?;
         debug!(
             "Selected input '{}' from dynamic section type '{}'",
             input_name, input_type
@@ -38,14 +38,14 @@ impl InputBuilder {
         match input_type {
             #[cfg(feature = "ros1")]
             "ros" => {
-                let input_cfg: ros1::Ros1Config = parse_named_entry(input_table)?;
+                let input_cfg: ros1::Ros1Config = parse_entry(input_table)?;
                 debug!("Creating ROS launcher for input '{}'", input_name);
                 let launcher = ros1::Ros1Instance::new(input_cfg);
                 launcher.launch(pipeline_tx).await
             }
             #[cfg(feature = "shell")]
             "shell" => {
-                let input_cfg: shell::ShellConfig = parse_named_entry(input_table)?;
+                let input_cfg: shell::ShellConfig = parse_entry(input_table)?;
                 debug!("Creating shell launcher for input '{}'", input_name);
                 let launcher = shell::ShellInstance::new(input_cfg);
                 launcher.launch(pipeline_tx).await

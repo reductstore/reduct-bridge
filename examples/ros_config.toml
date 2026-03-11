@@ -6,42 +6,48 @@ bucket = "my-bucket"
 prefix = "ros_data/"
 
 
-[[inputs.ros]]
-name = "ros-local"
+[inputs.ros.ros_local]
 uri = "http://localhost:11311"
 node_name = "reduct-bridge"
 
+[[inputs.ros.ros_local.topics]]
+name = "/chatter"
+entry_name = "time"
+message_type = "std_msgs/String"
+labels = [
+    { field = "data", label = "message" },
+    { static = { source = "ros1" } }
+]
 
-[[inputs.shell]]
-name = "shell-timestamp"
+
+# Shell inputs
+[inputs.shell.shell_timestamp]
 repeat_interval = 10
 command = "echo \"Time: $(date --rfc-3339=ns)\""
 entry_name = "time"
 content_type = "text/plain"
 labels = [
-    { regex = "Time: (.*)", labels = [ "timestamp" ] },
+    { regex = "Time: (.*)", labels = ["timestamp"] },
     { static = { source = "shell_command" } }
 ]
 
-[[inputs.shell]]
-name = "shell-echo"
+[inputs.shell.shell_echo]
 repeat_interval = 15
 command = "echo \"Hello from shell pipeline!\""
 entry_name = "echo"
 content_type = "text/plain"
 
 
-[[pipelines]]
-name = "telemetry"
+# Pipelines
+[pipelines.telemetry]
 remote = "local"
-inputs = ["ros-local"]
+inputs = ["ros_local"]
 
 
-[[pipelines]]
-name = "shell_pipeline"
+[pipelines.shell_pipeline]
 remote = "local"
-inputs = [ "shell-timestamp", "shell-echo" ]
+inputs = ["shell_timestamp", "shell_echo"]
 labels = [
-    { static = { source = "shell_pipeline"},  to = "*"  },
-    { from = "time", labels = [ "timestamp" ], to = "echo" }
+    { static = { source = "shell_pipeline" }, to = "*" },
+    { from = "time", labels = ["timestamp"], to = "echo" }
 ]

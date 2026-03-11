@@ -12,13 +12,20 @@ bucket = "my-bucket"
 prefix = "ros_data/"
 
 
-[[inputs.ros]]
-name = "ros-local"
+[inputs.ros.ros_local]
 uri = "http://localhost:11311"
 node_name = "reduct-bridge"
 
-[[inputs.shell]]
-name = "shell-local"
+[[inputs.ros.ros_local.topics]]
+name = "/chatter"
+entry_name = "time"
+message_type = "std_msgs/String"
+labels = [
+    { field = "data", label = "message" },
+    { static = { source = "ros1" } }
+]
+
+[inputs.shell.shell_local]
 repeat_interval = 10
 command = "echo \"Payload, $(date --rfc-3339=ns)\""
 entry_name = "shell_input"
@@ -29,12 +36,11 @@ labels = [
 ]
 
 
-[[pipelines]]
-name = "telemetry"
+[pipelines.telemetry]
 include_topics = ["/camera/*", "/lidar/points"]
 exclude_topics = ["/camera/image_raw/compressed"]
 remote = "local"
-input = "ros-local"
+inputs = ["ros_local"]
 static_labels = {source = "ros1", robot = "alpha"}
 dynamic_labels = { x-position = { source = "/odom/pose/position/x", scope = "*" } }
 ```

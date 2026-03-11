@@ -1,6 +1,6 @@
 mod reduct;
 
-use crate::cfg::{find_named_entry, parse_named_entry};
+use crate::cfg::{find_named_entry, parse_entry};
 use crate::message::Message;
 use anyhow::{Error, bail};
 use async_trait::async_trait;
@@ -29,7 +29,7 @@ impl RemoteBuilder {
 
         match remote_type {
             "reduct" => {
-                let remote_cfg: reduct::RemoteConfig = parse_named_entry(remote_table)?;
+                let remote_cfg: reduct::RemoteConfig = parse_entry(remote_table)?;
                 debug!("Creating launcher for remote '{}'", remote_name);
                 let launcher = reduct::ReductInstance::new(remote_cfg);
                 launcher.launch().await

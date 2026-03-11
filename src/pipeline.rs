@@ -13,7 +13,7 @@ const CHANNEL_SIZE: usize = 1024;
 
 #[derive(Debug, Clone)]
 struct NamedPipelineConfig {
-    name: Option<String>,
+    name: String,
     inputs: Vec<String>,
     remote: String,
     labels: Vec<PipelineLabelRuleConfig>,
@@ -56,8 +56,6 @@ fn default_wildcard() -> String {
 
 #[derive(Debug, Clone, Deserialize)]
 struct PipelineConfig {
-    #[serde(default)]
-    name: Option<String>,
     inputs: Vec<String>,
     remote: String,
     #[serde(default)]
@@ -73,7 +71,7 @@ pub trait PipelineLauncher: Send + Sync {
 }
 
 struct PassthroughPipelineLauncher {
-    pipeline_name: Option<String>,
+    pipeline_name: String,
     inputs: Vec<String>,
     label_rules: Vec<PipelineLabelRuleConfig>,
     preprocess: HashMap<String, Value>,
@@ -81,7 +79,7 @@ struct PassthroughPipelineLauncher {
 
 impl PassthroughPipelineLauncher {
     fn new(
-        pipeline_name: Option<String>,
+        pipeline_name: String,
         inputs: Vec<String>,
         label_rules: Vec<PipelineLabelRuleConfig>,
         preprocess: HashMap<String, Value>,
@@ -206,14 +204,14 @@ impl PipelineLauncher for PassthroughPipelineLauncher {
 
         info!(
             "Launching pipeline '{}' with {} preprocess fields and {} label rules",
-            pipeline_name.as_deref().unwrap_or("<unnamed>"),
+            pipeline_name,
             preprocess_keys.len(),
             label_rules.len()
         );
         tokio::spawn(async move {
             debug!(
                 "Pipeline worker started for '{}' preprocess fields: {:?} label rules: {}",
-                pipeline_name.as_deref().unwrap_or("<unnamed>"),
+                pipeline_name,
                 preprocess_keys,
                 label_rules.len()
             );
@@ -230,16 +228,12 @@ impl PipelineLauncher for PassthroughPipelineLauncher {
                 if let Err(err) = remote_tx.send(outbound.clone()).await {
                     warn!(
                         "Failed to forward message from pipeline '{}' to remote: {}",
-                        pipeline_name.as_deref().unwrap_or("<unnamed>"),
-                        err
+                        pipeline_name, err
                     );
                 }
 
                 if matches!(outbound, Message::Stop) {
-                    info!(
-                        "Stop received, shutting down pipeline '{}'",
-                        pipeline_name.as_deref().unwrap_or("<unnamed>")
-                    );
+                    info!("Stop received, shutting down pipeline '{}'", pipeline_name);
                     break;
                 }
             }
@@ -313,8 +307,7 @@ impl PipelineBuilder {
                 .with_context(|| {
                     format!(
                         "Pipeline '{}' references unknown remote '{}'",
-                        cfg.name.as_deref().unwrap_or("<unnamed>"),
-                        cfg.remote
+                        cfg.name, cfg.remote
                     )
                 })?;
 
@@ -390,26 +383,26 @@ fn parse_pipeline_configs(config: &Value) -> Result<Vec<NamedPipelineConfig>, Er
         .get("pipelines")
         .context("Missing 'pipelines' in configuration")?;
     let entries = pipelines
-        .as_array()
-        .context("Invalid 'pipelines' format; expected [[pipelines]] array")?;
+        .as_table()
+        .context("Invalid 'pipelines' format; expected [pipelines.<name>] table entries")?;
 
     let mut results = Vec::new();
 
-    for entry in entries {
+    for (pipeline_name, entry) in entries {
         let cfg: PipelineConfig = entry
             .clone()
             .try_into()
-            .context("Invalid pipeline entry in [[pipelines]]")?;
+            .with_context(|| format!("Invalid pipeline entry in [pipelines.{pipeline_name}]"))?;
 
         if cfg.inputs.is_empty() {
             bail!(
                 "Pipeline '{}' must define non-empty 'inputs'",
-                cfg.name.as_deref().unwrap_or("<unnamed>")
+                pipeline_name
             );
         }
 
         results.push(NamedPipelineConfig {
-            name: cfg.name,
+            name: pipeline_name.clone(),
             inputs: cfg.inputs,
             remote: cfg.remote,
             labels: cfg.labels,
