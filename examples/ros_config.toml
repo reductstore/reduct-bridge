@@ -1,6 +1,6 @@
 [[remotes.reduct]]
 name = "local"
-url = "http://localhost:8333"
+url = "http://localhost:8383"
 token_api = "***"
 bucket = "my-bucket"
 prefix = "ros_data/"
@@ -19,7 +19,7 @@ command = "echo \"Payload, $(date --rfc-3339=ns)\""
 entry_name = "shell_input"
 content_type = "text/plain"
 labels = [
-    { regex = "Payload, (.*)", labels = { timestamp = "$1" } },
+    { regex = "Payload, (.*)", labels = [ "timestamp" ] },
     { static = { source = "shell_command" } }
 ]
 

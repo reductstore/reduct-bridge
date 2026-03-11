@@ -3,7 +3,7 @@ use crate::message::{Message, Record};
 use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
-use regex::{Captures, Regex};
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::process::Command;
@@ -26,24 +26,14 @@ pub struct ShellConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum ShellLabelRule {
-    Regex {
-        regex: String,
-        labels: HashMap<String, String>,
-    },
-    Static {
-        r#static: HashMap<String, String>,
-    },
+    Regex { regex: String, labels: Vec<String> },
+    Static { r#static: HashMap<String, String> },
 }
 
 #[derive(Debug, Clone)]
 enum PreparedShellLabelRule {
-    Regex {
-        regex: Regex,
-        labels: HashMap<String, String>,
-    },
-    Static {
-        labels: HashMap<String, String>,
-    },
+    Regex { regex: Regex, labels: Vec<String> },
+    Static { labels: HashMap<String, String> },
 }
 
 pub struct ShellInstance {
@@ -86,34 +76,6 @@ impl ShellInstance {
         Ok(prepared_rules)
     }
 
-    fn substitute_captures(template: &str, captures: &Captures<'_>) -> String {
-        let mut out = String::with_capacity(template.len());
-        let bytes = template.as_bytes();
-        let mut i = 0usize;
-
-        while i < bytes.len() {
-            if bytes[i] == b'$' {
-                let mut j = i + 1;
-                while j < bytes.len() && bytes[j].is_ascii_digit() {
-                    j += 1;
-                }
-                if j > i + 1 {
-                    let idx = template[i + 1..j].parse::<usize>().ok();
-                    if let Some(value) = idx.and_then(|k| captures.get(k).map(|m| m.as_str())) {
-                        out.push_str(value);
-                    }
-                    i = j;
-                    continue;
-                }
-            }
-
-            out.push(bytes[i] as char);
-            i += 1;
-        }
-
-        out
-    }
-
     fn build_labels(
         line: &str,
         prepared_rules: &[PreparedShellLabelRule],
@@ -124,11 +86,13 @@ impl ShellInstance {
             match rule {
                 PreparedShellLabelRule::Regex {
                     regex,
-                    labels: template_labels,
+                    labels: regex_labels,
                 } => {
                     if let Some(captures) = regex.captures(line) {
-                        for (key, value) in template_labels {
-                            labels.insert(key.clone(), Self::substitute_captures(value, &captures));
+                        for (idx, label_name) in regex_labels.iter().enumerate() {
+                            if let Some(value) = captures.get(idx + 1) {
+                                labels.insert(label_name.clone(), value.as_str().to_string());
+                            }
                         }
                     }
                 }
@@ -155,6 +119,7 @@ impl ShellInstance {
         }
 
         Ok(Record {
+            entry_name: cfg.entry_name.clone(),
             content: line.to_string().into(),
             content_type: cfg.content_type.clone(),
             labels: Self::build_labels(line, prepared_rules),

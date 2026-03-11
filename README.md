@@ -24,7 +24,7 @@ command = "echo \"Payload, $(date --rfc-3339=ns)\""
 entry_name = "shell_input"
 content_type = "text/plain"
 labels = [
-    { regex = "Payload, (.*)", labels = { timestamp = "$1" } },
+    { regex = "Payload, (.*)", labels = [ "timestamp" ] },
     { static = { source = "shell_command" } }
 ]
 
