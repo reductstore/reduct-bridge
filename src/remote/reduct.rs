@@ -141,7 +141,7 @@ impl RemoteInstanceLauncher for ReductInstance {
                 tokio::select! {
                     maybe_message = rx.recv() => {
                         match maybe_message {
-                            Some(Message::Record(record)) => {
+                            Some(Message::Data(record)) => {
                                 batch.append_record(Self::to_reduct_record(&cfg, record));
                                 if batch.record_count() > cfg.batch_max_records
                                     || batch.size() > cfg.batch_max_size_bytes

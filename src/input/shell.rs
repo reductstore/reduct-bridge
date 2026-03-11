@@ -185,7 +185,7 @@ impl InputLauncher for ShellInstance {
                             for line in stdout.lines().map(str::trim).filter(|line| !line.is_empty()) {
                                 match Self::parse_record_line(line, &cfg, &prepared_label_rules) {
                                     Ok(record) => {
-                                        if let Err(err) = pipeline_tx.send(Message::Record(record)).await {
+                                        if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
                                             warn!("Failed to forward shell record message to pipeline: {}", err);
                                         } else {
                                             sent_records += 1;

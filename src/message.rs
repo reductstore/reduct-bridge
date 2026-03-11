@@ -11,8 +11,7 @@ pub struct Record {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Record(Record),
+    Data(Record),
     Attachment,
-    BlanketLabels,
     Stop,
 }
