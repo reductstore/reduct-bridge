@@ -1,0 +1,33 @@
+[[remotes.reduct]]
+name = "local"
+url = "http://127.0.0.1:18383"
+token_api = ""
+bucket = "ros-it"
+prefix = ""
+batch_max_interval_ms = 100
+
+[inputs.ros.ros_local]
+uri = "http://127.0.0.1:11311"
+node_name = "reduct_bridge_it"
+queue_size = 128
+
+[[inputs.ros.ros_local.topics]]
+name = "/sensor/pos"
+entry_name = "sensor-pos"
+message_type = "geometry_msgs/Point"
+labels = [
+    { field = "x", label = "x" }
+]
+
+[[inputs.ros.ros_local.topics]]
+name = "/camra/raw"
+entry_name = "camera-raw"
+message_type = "sensor_msgs/Image"
+labels = []
+
+[pipelines.telemetry]
+inputs = ["ros_local"]
+remote = "local"
+labels = [
+    { from = "sensor-pos", labels = ["x"], to = "camera-raw" }
+]

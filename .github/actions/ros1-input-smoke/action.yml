@@ -1,0 +1,91 @@
+name: "ROS1 Input Smoke Test"
+description: "Runs reduct-bridge against ROS1 publishers and validates ReductStore records and labels."
+inputs:
+  bridge_binary:
+    description: "Path to reduct-bridge binary"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Run ROS1 smoke test
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        BRIDGE_BIN="${{ inputs.bridge_binary }}"
+        REDUCT_CONTAINER="reduct-store-it"
+        ROS_CONTAINER="ros-master-it"
+        REDUCT_URL="http://127.0.0.1:18383"
+        BUCKET="ros-it"
+        ALIAS="it"
+        EXPORT_DIR="/tmp/ros-it-export"
+        BRIDGE_CFG="${GITHUB_WORKSPACE}/.github/configs/ros1_input_it.toml"
+
+        cleanup() {
+          set +e
+          if [[ -n "${BRIDGE_PID:-}" ]]; then
+            kill -INT "$BRIDGE_PID" >/dev/null 2>&1 || true
+            wait "$BRIDGE_PID" >/dev/null 2>&1 || true
+          fi
+          docker rm -f "$ROS_CONTAINER" >/dev/null 2>&1 || true
+          docker rm -f "$REDUCT_CONTAINER" >/dev/null 2>&1 || true
+        }
+        trap cleanup EXIT
+
+        docker run -d --rm --name "$REDUCT_CONTAINER" -p 18383:8383 reduct/store:latest
+
+        for _ in $(seq 1 30); do
+          if curl -sf "${REDUCT_URL}/api/v1/alive" >/dev/null; then
+            break
+          fi
+          sleep 1
+        done
+
+        asset="reduct-cli.x86_64-unknown-linux-gnu.tar.gz"
+        url="https://github.com/reductstore/reduct-cli/releases/latest/download/${asset}"
+        wget -q -O "/tmp/${asset}" "$url"
+        tar -xzf "/tmp/${asset}" -C /tmp
+        chmod +x /tmp/reduct-cli
+
+        /tmp/reduct-cli alias rm "$ALIAS" >/dev/null 2>&1 || true
+        /tmp/reduct-cli alias add "$ALIAS" --url "$REDUCT_URL"
+        /tmp/reduct-cli bucket create "$ALIAS/$BUCKET" >/dev/null 2>&1 || true
+
+        docker run -d --rm --name "$ROS_CONTAINER" --network host ros:noetic-ros-base roscore
+        sleep 5
+
+        chmod +x "$BRIDGE_BIN"
+        "$BRIDGE_BIN" "$BRIDGE_CFG" >/tmp/reduct-bridge-it.log 2>&1 &
+        BRIDGE_PID=$!
+        sleep 4
+
+        docker run --rm --network host \
+          -v "${GITHUB_WORKSPACE}/.github/scripts:/scripts:ro" \
+          ros:noetic-ros-base \
+          python3 /scripts/ros1_publish.py --count 8 --period 0.2
+
+        sleep 2
+        kill -INT "$BRIDGE_PID"
+        wait "$BRIDGE_PID"
+        unset BRIDGE_PID
+
+        rm -rf "$EXPORT_DIR"
+        mkdir -p "$EXPORT_DIR"
+        /tmp/reduct-cli cp "$ALIAS/$BUCKET" "$EXPORT_DIR" -n camera-raw -l 5 -m
+
+        meta_count="$(find "$EXPORT_DIR/camera-raw" -type f -name '*-meta.json' | wc -l | tr -d ' ')"
+        if [[ "$meta_count" -lt 1 ]]; then
+          echo "No camera-raw records exported"
+          exit 1
+        fi
+
+        first_meta="$(find "$EXPORT_DIR/camera-raw" -type f -name '*-meta.json' | head -n 1)"
+        if [[ -z "$first_meta" ]]; then
+          echo "No metadata file found for camera-raw records"
+          exit 1
+        fi
+        if ! jq -e '.labels.x != null and (.labels.x | tostring | length > 0)' "$first_meta" >/dev/null; then
+          echo "Missing x label in exported camera-raw metadata:"
+          cat "$first_meta"
+          exit 1
+        fi
