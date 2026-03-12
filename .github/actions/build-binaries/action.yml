@@ -62,7 +62,7 @@ runs:
 
     - name: Build binary (PR)
       if: github.event_name == 'pull_request'
-      run: cargo build --profile ci -p reductstore --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api"
+      run: cargo build --profile ci -p reduct-bridge --target ${{ inputs.target }}
       shell: bash
 
     - name: Upload binary (PR)
@@ -70,13 +70,13 @@ runs:
       # Only upload Linux binary for PRs for sanity test
       if: github.event_name == 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
       with:
-        name: reductstore-${{ inputs.target }}
-        path: target/${{inputs.target}}/ci/reductstore
+        name: reduct-bridge-${{ inputs.target }}
+        path: target/${{inputs.target}}/ci/reduct-bridge
         if-no-files-found: 'error'
 
     - name: Build binary (Release)
       if: github.event_name != 'pull_request'
-      run: cargo build --profile release -p reductstore --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api"
+      run: cargo build --profile release -p reduct-bridge --target ${{ inputs.target }}
       shell: bash
 
 
@@ -84,8 +84,8 @@ runs:
       uses: actions/upload-artifact@v4
       if: github.event_name != 'pull_request'
       with:
-        name: reductstore-${{ inputs.target }}
-        path: target/${{inputs.target}}/release/reductstore${{ inputs.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
+        name: reduct-bridge-${{ inputs.target }}
+        path: target/${{inputs.target}}/release/reduct-bridge${{ inputs.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
         if-no-files-found: 'error'
 
 
@@ -102,5 +102,5 @@ runs:
     - name: Upload tests
       uses: actions/upload-artifact@v4
       with:
-        name: reductstore-tests-${{ inputs.target }}
+        name: reduct-bridge-tests-${{ inputs.target }}
         path: target/${{ inputs.target }}/tests
