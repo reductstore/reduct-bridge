@@ -76,7 +76,7 @@ runs:
 
     - name: Build binary (Release)
       if: github.event_name != 'pull_request'
-      run: cargo build --profile release -p reduct-bridge --target ${{ inputs.target }}
+      run: cargo build --locked --profile release -p reduct-bridge --target ${{ inputs.target }}
       shell: bash
 
 
