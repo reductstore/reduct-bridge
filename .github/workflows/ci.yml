@@ -129,6 +129,28 @@ jobs:
         with:
           bridge_binary: ./tmp/bin/reduct-bridge
 
+  shell_input_integration:
+    name: Shell Input Integration
+    needs:
+      - rust_fmt
+      - build_binaries
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download reduct-bridge Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: reduct-bridge-x86_64-unknown-linux-gnu
+          path: ./tmp/bin
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - uses: ./.github/actions/shell-input-smoke
+        with:
+          bridge_binary: ./tmp/bin/reduct-bridge
+
   coverage:
     name: Generate Code Coverage
     needs:

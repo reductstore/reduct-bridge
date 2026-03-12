@@ -1,0 +1,21 @@
+[[remotes.reduct]]
+name = "local"
+url = "http://127.0.0.1:8383"
+token_api = ""
+bucket = "shell-it"
+prefix = ""
+batch_max_interval_ms = 100
+
+[inputs.shell.shell_local]
+repeat_interval = 1
+command = "echo \"Payload, $(date --rfc-3339=ns)\""
+entry_name = "shell-input"
+content_type = "text/plain"
+labels = [
+    { regex = "Payload, (.*)", labels = ["timestamp"] },
+    { static = { source = "shell_command" } }
+]
+
+[pipelines.shell_pipeline]
+remote = "local"
+inputs = ["shell_local"]

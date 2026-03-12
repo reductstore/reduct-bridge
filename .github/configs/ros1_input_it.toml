@@ -1,6 +1,6 @@
 [[remotes.reduct]]
 name = "local"
-url = "http://127.0.0.1:18383"
+url = "http://127.0.0.1:8383"
 token_api = ""
 bucket = "ros-it"
 prefix = ""

@@ -7,38 +7,26 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - uses: ./.github/actions/run-reductstore
+      with:
+        container_name: reduct-store-it
+        host_port: 8383
+        log_level: DEBUG
+
     - name: Run ROS1 smoke test
       shell: bash
       run: |
         set -euo pipefail
 
         BRIDGE_BIN="${{ inputs.bridge_binary }}"
-        REDUCT_CONTAINER="reduct-store-it"
         ROS_CONTAINER="ros-master-it"
-        REDUCT_URL="http://127.0.0.1:18383"
+        REDUCT_URL="http://127.0.0.1:8383"
         BUCKET="ros-it"
         BRIDGE_CFG="${GITHUB_WORKSPACE}/.github/configs/ros1_input_it.toml"
         BRIDGE_LOG="/tmp/reduct-bridge-it.log"
 
         rm -f /tmp/reduct-bridge-it.pid "$BRIDGE_LOG"
         docker rm -f "$ROS_CONTAINER" >/dev/null 2>&1 || true
-        docker rm -f "$REDUCT_CONTAINER" >/dev/null 2>&1 || true
-
-        echo "=== [ros1-it] Starting ReductStore in debug mode ==="
-        docker run -d --rm --name "$REDUCT_CONTAINER" \
-          -e RS_LOG_LEVEL=DEBUG \
-          -p 18383:8383 \
-          reduct/store:main
-
-        echo "=== [ros1-it] Waiting for ReductStore health ==="
-        for _ in $(seq 1 30); do
-          if curl -sf "${REDUCT_URL}/api/v1/alive" >/dev/null; then
-            echo "=== [ros1-it] ReductStore is alive ==="
-            break
-          fi
-          sleep 1
-        done
-        sleep 1
 
         echo "=== [ros1-it] Creating bucket via ReductStore API ==="
         curl -sf -X POST "${REDUCT_URL}/api/v1/b/${BUCKET}" \
