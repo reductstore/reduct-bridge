@@ -17,9 +17,6 @@ runs:
         ROS_CONTAINER="ros-master-it"
         REDUCT_URL="http://127.0.0.1:18383"
         BUCKET="ros-it"
-        ALIAS="it"
-        EXPORT_DIR="/tmp/ros-it-export"
-        ATTACH_EXPORT_DIR="/tmp/ros-it-attach-export"
         BRIDGE_CFG="${GITHUB_WORKSPACE}/.github/configs/ros1_input_it.toml"
         BRIDGE_LOG="/tmp/reduct-bridge-it.log"
 
@@ -41,18 +38,12 @@ runs:
           fi
           sleep 1
         done
+        sleep 1
 
-        echo "=== [ros1-it] Downloading reduct-cli ==="
-        asset="reduct-cli.x86_64-unknown-linux-gnu.tar.gz"
-        url="https://github.com/reductstore/reduct-cli/releases/latest/download/${asset}"
-        wget -q -O "/tmp/${asset}" "$url"
-        tar -xzf "/tmp/${asset}" -C /tmp
-        chmod +x /tmp/reduct-cli
-
-        echo "=== [ros1-it] Preparing alias and bucket ==="
-        /tmp/reduct-cli alias rm "$ALIAS" >/dev/null 2>&1 || true
-        /tmp/reduct-cli alias add "$ALIAS" --url "$REDUCT_URL"
-        /tmp/reduct-cli bucket create "$ALIAS/$BUCKET" >/dev/null 2>&1 || true
+        echo "=== [ros1-it] Creating bucket via ReductStore API ==="
+        curl -sf -X POST "${REDUCT_URL}/api/v1/b/${BUCKET}" \
+          -H "Content-Type: application/json" \
+          -d '{}' >/dev/null || true
 
         echo "=== [ros1-it] Starting ROS1 master ==="
         docker run -d --rm --name "$ROS_CONTAINER" --network host ros:noetic-ros-base roscore
@@ -77,52 +68,34 @@ runs:
         wait "$BRIDGE_PID"
         rm -f /tmp/reduct-bridge-it.pid
 
-        echo "=== [ros1-it] Exporting records from ReductStore ==="
-        rm -rf "$EXPORT_DIR"
-        mkdir -p "$EXPORT_DIR"
-        /tmp/reduct-cli cp "$ALIAS/$BUCKET" "$EXPORT_DIR" -n camera-raw -l 5 -m
-
-        meta_count="$(find "$EXPORT_DIR/camera-raw" -type f -name '*-meta.json' | wc -l | tr -d ' ')"
-        if [[ "$meta_count" -lt 1 ]]; then
-          echo "No camera-raw records exported"
+        echo "=== [ros1-it] Verifying camera-raw label using ReductStore API ==="
+        bucket_json="$(curl -sf "${REDUCT_URL}/api/v1/b/${BUCKET}")"
+        camera_ts="$(echo "$bucket_json" | jq -r '.entries[] | select(.name=="camera-raw") | .latest_record')"
+        if [[ -z "$camera_ts" || "$camera_ts" == "null" ]]; then
+          echo "camera-raw entry was not found in bucket metadata"
+          echo "$bucket_json"
           exit 1
         fi
 
-        first_meta="$(find "$EXPORT_DIR/camera-raw" -type f -name '*-meta.json' | head -n 1)"
-        if [[ -z "$first_meta" ]]; then
-          echo "No metadata file found for camera-raw records"
-          exit 1
-        fi
-        if ! jq -e '.labels.x != null and (.labels.x | tostring | length > 0)' "$first_meta" >/dev/null; then
-          echo "Missing x label in exported camera-raw metadata:"
-          cat "$first_meta"
+        camera_head="$(curl -sfI "${REDUCT_URL}/api/v1/b/${BUCKET}/camera-raw?ts=${camera_ts}")"
+        if ! echo "$camera_head" | grep -Eiq '^x-reduct-label-x:\s*.+$'; then
+          echo "x label is missing in camera-raw record headers:"
+          echo "$camera_head"
           exit 1
         fi
 
         echo "=== [ros1-it] Verifying ROS attachment payload ==="
-        rm -rf "$ATTACH_EXPORT_DIR"
-        mkdir -p "$ATTACH_EXPORT_DIR"
-        /tmp/reduct-cli cp "$ALIAS/$BUCKET" "$ATTACH_EXPORT_DIR" -n 'camera-raw/$meta' -l 5 -m
-
-        attach_meta="$(find "$ATTACH_EXPORT_DIR" -type f -name '*-meta.json' | head -n 1)"
-        if [[ -z "$attach_meta" ]]; then
-          echo "No attachment metadata exported for camera-raw/$meta"
-          exit 1
-        fi
-        if ! jq -e '.labels.key == "$ros"' "$attach_meta" >/dev/null; then
-          echo "Attachment key is not \$ros:"
-          cat "$attach_meta"
+        attach_head="$(curl -sfI "${REDUCT_URL}/api/v1/b/${BUCKET}/camera-raw/\$meta")"
+        if ! echo "$attach_head" | grep -Fq 'x-reduct-label-key: $ros'; then
+          echo "Attachment key \$ros is missing in attachment headers:"
+          echo "$attach_head"
           exit 1
         fi
 
-        attach_payload="$(find "$ATTACH_EXPORT_DIR" -type f ! -name '*-meta.json' | head -n 1)"
-        if [[ -z "$attach_payload" ]]; then
-          echo "No attachment payload exported for camera-raw/$meta"
-          exit 1
-        fi
-        if ! jq -e '.encoding == "ros1" and (.schema | type == "string") and (.topic == "/camra/raw") and (.schema_name | type == "string")' "$attach_payload" >/dev/null; then
+        attach_payload="$(curl -sf "${REDUCT_URL}/api/v1/b/${BUCKET}/camera-raw/\$meta")"
+        if ! echo "$attach_payload" | jq -e '.encoding == "ros1" and (.schema | type == "string") and (.topic == "/camra/raw") and (.schema_name | type == "string")' >/dev/null; then
           echo "Invalid ROS attachment payload:"
-          cat "$attach_payload"
+          echo "$attach_payload"
           exit 1
         fi
         echo "=== [ros1-it] Verification passed: camera-raw has x label and ROS attachment ==="

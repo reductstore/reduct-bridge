@@ -328,6 +328,7 @@ mod tests {
             sleep(Duration::from_millis(250)).await;
         }
         assert!(alive, "ReductStore did not become alive at {url}");
+        sleep(Duration::from_secs(2)).await;
 
         client
             .create_bucket(&bucket_name)
