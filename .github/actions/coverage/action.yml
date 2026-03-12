@@ -22,6 +22,15 @@ runs:
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
 
+    - name: Run Docker-backed ReductStore test (CI feature)
+      shell: bash
+      env:
+        CARGO_TERM_COLOR: always
+        RUST_LOG: debug
+      run: |
+        set -e -x
+        cargo test --features ci docker_reductstore_roundtrip_data_and_attachment -- --nocapture
+
     - name: Run code coverage
       shell: bash
       env:
