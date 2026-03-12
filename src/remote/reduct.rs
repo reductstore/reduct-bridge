@@ -108,17 +108,15 @@ impl ReductInstance {
         }
     }
 
-    async fn write_attachment(bucket: &Bucket, attachment: Attachment) {
+    async fn write_attachment(cfg: &RemoteConfig, bucket: &Bucket, attachment: Attachment) {
+        let mut entry = String::with_capacity(cfg.prefix.len() + attachment.entry_name.len());
+        entry.push_str(&cfg.prefix);
+        entry.push_str(&attachment.entry_name);
+
         let mut attachments = std::collections::HashMap::new();
         attachments.insert(attachment.key, attachment.payload);
-        if let Err(err) = bucket
-            .write_attachments(&attachment.entry_name, attachments)
-            .await
-        {
-            warn!(
-                "Failed to write attachment for entry '{}': {}",
-                attachment.entry_name, err
-            );
+        if let Err(err) = bucket.write_attachments(&entry, attachments).await {
+            warn!("Failed to write attachment for entry '{}': {}", entry, err);
         }
     }
 }
@@ -177,7 +175,7 @@ impl RemoteInstanceLauncher for ReductInstance {
                                 }
                             }
                             Some(Message::Attachment(attachment)) => {
-                                Self::write_attachment(&bucket, attachment).await;
+                                Self::write_attachment(&cfg, &bucket, attachment).await;
                             }
                             Some(Message::Stop) => {
                                 info!("Stop message received, flushing Reduct batch before shutdown");
@@ -201,5 +199,179 @@ impl RemoteInstanceLauncher for ReductInstance {
         });
 
         Ok(tx)
+    }
+}
+
+#[cfg(all(test, feature = "ci"))]
+mod tests {
+    use super::{ReductInstance, RemoteConfig};
+    use crate::message::{Attachment, Message, Record};
+    use crate::remote::RemoteInstanceLauncher;
+    use bytes::Bytes;
+    use futures_util::StreamExt;
+    use reduct_rs::ReductClient;
+    use rstest::{fixture, rstest};
+    use serde_json::json;
+    use std::collections::HashMap;
+    use std::net::TcpListener;
+    use std::process::Command;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use tokio::time::sleep;
+
+    fn free_port() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind free port");
+        listener.local_addr().expect("local addr").port()
+    }
+
+    fn unique_suffix() -> String {
+        format!(
+            "{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        )
+    }
+
+    fn run_command(args: &[&str]) -> std::process::Output {
+        Command::new(args[0])
+            .args(&args[1..])
+            .output()
+            .expect("run command")
+    }
+
+    struct DockerGuard {
+        container: String,
+    }
+
+    impl Drop for DockerGuard {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                let logs = run_command(&["docker", "logs", &self.container]);
+                eprintln!("=== ReductStore logs ({}) ===", self.container);
+                if !logs.stdout.is_empty() {
+                    eprintln!("{}", String::from_utf8_lossy(&logs.stdout));
+                }
+                if !logs.stderr.is_empty() {
+                    eprintln!("{}", String::from_utf8_lossy(&logs.stderr));
+                }
+            }
+            let _ = run_command(&["docker", "rm", "-f", &self.container]);
+        }
+    }
+
+    #[fixture]
+    fn data_message() -> Message {
+        Message::Data(Record {
+            entry_name: "entry".to_string(),
+            content: Bytes::from("hello"),
+            content_type: Some("text/plain".to_string()),
+            labels: HashMap::from([("l".to_string(), "1".to_string())]),
+        })
+    }
+
+    #[fixture]
+    fn ros_attachment_message() -> Message {
+        Message::Attachment(Attachment {
+            entry_name: "entry".to_string(),
+            key: "$ros".to_string(),
+            payload: json!({
+                "encoding": "ros1",
+                "schema": "float64 x",
+                "topic": "/sensor/pos",
+                "schema_name": "geometry_msgs/Point",
+            }),
+        })
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn docker_reductstore_roundtrip_data_and_attachment(
+        data_message: Message,
+        ros_attachment_message: Message,
+    ) {
+        let port = free_port();
+        let suffix = unique_suffix();
+        let container = format!("reduct-bridge-test-{suffix}");
+        let bucket_name = format!("it-{suffix}");
+        let url = format!("http://127.0.0.1:{port}");
+
+        let _guard = DockerGuard {
+            container: container.clone(),
+        };
+
+        let start = run_command(&[
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            &container,
+            "-p",
+            &format!("{port}:8383"),
+            "reduct/store:main",
+        ]);
+        assert!(
+            start.status.success(),
+            "failed to start docker: {}",
+            String::from_utf8_lossy(&start.stderr)
+        );
+
+        let client = ReductClient::builder().url(&url).api_token("").build();
+        let mut alive = false;
+        for _ in 0..40 {
+            if client.alive().await.is_ok() {
+                alive = true;
+                break;
+            }
+            sleep(Duration::from_millis(250)).await;
+        }
+        assert!(alive, "ReductStore did not become alive at {url}");
+
+        client
+            .create_bucket(&bucket_name)
+            .exist_ok(true)
+            .send()
+            .await
+            .expect("create bucket");
+
+        let remote = ReductInstance::new(RemoteConfig {
+            url: url.clone(),
+            token_api: "".to_string(),
+            bucket: bucket_name.clone(),
+            prefix: "it/".to_string(),
+            batch_max_records: 10,
+            batch_max_size_bytes: 1024 * 1024,
+            batch_max_interval_ms: 50,
+        });
+
+        let tx = remote.launch().await.expect("launch remote");
+        tx.send(data_message).await.expect("send data");
+        tx.send(ros_attachment_message)
+            .await
+            .expect("send attachment");
+
+        tx.send(Message::Stop).await.expect("send stop");
+        sleep(Duration::from_millis(400)).await;
+
+        let bucket = client.get_bucket(&bucket_name).await.expect("get bucket");
+        let mut query = bucket.query("it/entry").send().await.expect("query");
+        let rec = query.next().await.expect("record").expect("query result");
+        assert_eq!(rec.content_type(), "text/plain");
+        assert_eq!(rec.labels().get("l").map(String::as_str), Some("1"));
+        assert_eq!(
+            rec.bytes().await.expect("record bytes"),
+            Bytes::from("hello")
+        );
+
+        let attachments = bucket
+            .read_attachments("it/entry")
+            .await
+            .expect("read attachments");
+        let payload = attachments.get("$ros").expect("$ros attachment");
+        assert_eq!(payload["encoding"], "ros1");
+        assert_eq!(payload["topic"], "/sensor/pos");
+        assert_eq!(payload["schema_name"], "geometry_msgs/Point");
     }
 }

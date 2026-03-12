@@ -27,3 +27,10 @@ runs:
           chmod +x $f
           $f --nocapture
         done
+
+    - name: Run Docker-backed CI feature tests (Linux only)
+      if: ${{ startsWith(inputs.os, 'ubuntu-') }}
+      shell: bash
+      run: |
+        set -e -x
+        cargo test --features ci docker_reductstore_roundtrip_data_and_attachment -- --nocapture

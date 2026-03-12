@@ -71,3 +71,33 @@ impl InputBuilder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::InputBuilder;
+    use crate::message::Message;
+    use rstest::rstest;
+    use tokio::sync::mpsc::channel;
+    use toml::Value;
+
+    #[rstest]
+    #[case("custom")]
+    #[case("unknown")]
+    #[tokio::test]
+    async fn rejects_unsupported_input_type(#[case] input_type: &str) {
+        let cfg_text = format!(
+            r#"
+            [inputs.{input_type}.my_input]
+            value = "x"
+            "#
+        );
+        let cfg: Value = toml::from_str(&cfg_text).unwrap();
+        let (tx, _rx) = channel::<Message>(8);
+        let err = InputBuilder::new()
+            .build(&cfg, "my_input", tx)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(&format!("Unsupported input type '{input_type}'")));
+    }
+}

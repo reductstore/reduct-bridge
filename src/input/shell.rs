@@ -231,3 +231,78 @@ impl InputLauncher for ShellInstance {
         Ok(tx)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ShellConfig, ShellInstance, ShellLabelRule};
+    use rstest::{fixture, rstest};
+    use std::collections::HashMap;
+
+    #[fixture]
+    fn shell_cfg() -> ShellConfig {
+        ShellConfig {
+            repeat_interval: 1,
+            command: "echo payload".to_string(),
+            entry_name: "shell-entry".to_string(),
+            content_type: Some("text/plain".to_string()),
+            labels: vec![
+                ShellLabelRule::Regex {
+                    regex: r"payload-(\d+)-(\w+)".to_string(),
+                    labels: vec!["id".to_string(), "name".to_string()],
+                },
+                ShellLabelRule::Static {
+                    r#static: HashMap::from([("source".to_string(), "shell".to_string())]),
+                },
+            ],
+        }
+    }
+
+    #[rstest]
+    #[case("(unclosed")]
+    #[case("[bad")]
+    fn invalid_regex_is_rejected(#[case] regex: &str) {
+        let cfg = ShellConfig {
+            repeat_interval: 1,
+            command: "echo hi".to_string(),
+            entry_name: "entry".to_string(),
+            content_type: None,
+            labels: vec![ShellLabelRule::Regex {
+                regex: regex.to_string(),
+                labels: vec!["x".to_string()],
+            }],
+        };
+        let err = ShellInstance::prepare_label_rules(&cfg)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("invalid shell label regex"));
+    }
+
+    #[rstest]
+    #[case("payload-42-camera", "42", "camera")]
+    #[case("payload-100-lidar", "100", "lidar")]
+    fn parse_record_builds_labels_from_rules(
+        shell_cfg: ShellConfig,
+        #[case] line: &str,
+        #[case] expected_id: &str,
+        #[case] expected_name: &str,
+    ) {
+        let cfg = shell_cfg;
+        let rules = ShellInstance::prepare_label_rules(&cfg).expect("prepare label rules");
+        let record = ShellInstance::parse_record_line(line, &cfg, &rules).expect("parse line");
+
+        assert_eq!(record.entry_name, "shell-entry");
+        assert_eq!(record.content_type.as_deref(), Some("text/plain"));
+        assert_eq!(
+            record.labels.get("id").map(String::as_str),
+            Some(expected_id)
+        );
+        assert_eq!(
+            record.labels.get("name").map(String::as_str),
+            Some(expected_name)
+        );
+        assert_eq!(
+            record.labels.get("source").map(String::as_str),
+            Some("shell")
+        );
+    }
+}
