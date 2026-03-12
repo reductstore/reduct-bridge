@@ -12,7 +12,7 @@ runs:
   steps:
     - uses: actions/download-artifact@v4
       with:
-        name: reductstore-tests-${{ inputs.target }}
+        name: reduct-bridge-tests-${{ inputs.target }}
         path: ./tmp/tests
 
     - name: Run tests
@@ -20,7 +20,7 @@ runs:
       run: |
         set -e -x
         for f in ./tmp/tests/*; do
-          # exclude reduct_macros
+          # exclude proc-macro helper crates that are not directly executable tests
           if [[ $f == *"reduct_macros"* ]]; then
             continue
           fi

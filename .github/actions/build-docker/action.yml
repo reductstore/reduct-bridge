@@ -35,8 +35,8 @@ runs:
   steps:
     - uses: actions/download-artifact@v4
       with:
-        name: reductstore-${{ inputs.target }}
-        path: /tmp/reductstore/
+        name: reduct-bridge-${{ inputs.target }}
+        path: /tmp/reduct-bridge/
 
     - name: Download reduct-cli from latest release
       shell: bash
@@ -72,9 +72,9 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        REDUCTSTORE_BIN="$(find /tmp/reductstore -type f -name reductstore | head -n 1)"
-        if [ -z "$REDUCTSTORE_BIN" ]; then
-          echo "reductstore binary not found in /tmp/reductstore"
+        REDUCT_BRIDGE_BIN="$(find /tmp/reduct-bridge -type f -name reduct-bridge | head -n 1)"
+        if [ -z "$REDUCT_BRIDGE_BIN" ]; then
+          echo "reduct-bridge binary not found in /tmp/reduct-bridge"
           exit 1
         fi
         REDUCT_CLI_BIN="$(find /tmp/reduct-cli -type f -name reduct-cli | head -n 1)"
@@ -85,16 +85,16 @@ runs:
 
         rm -rf .image-build
         mkdir -p .image-build/usr/local/bin .image-build/data
-        install -m 0755 "$REDUCTSTORE_BIN" .image-build/usr/local/bin/reductstore
+        install -m 0755 "$REDUCT_BRIDGE_BIN" .image-build/usr/local/bin/reduct-bridge
         install -m 0755 "$REDUCT_CLI_BIN" .image-build/usr/local/bin/reduct-cli
 
     - name: Verify build context binaries
       shell: bash
       run: |
         set -euo pipefail
-        test -x .image-build/usr/local/bin/reductstore
+        test -x .image-build/usr/local/bin/reduct-bridge
         test -x .image-build/usr/local/bin/reduct-cli
-        ls -l .image-build/usr/local/bin/reductstore .image-build/usr/local/bin/reduct-cli
+        ls -l .image-build/usr/local/bin/reduct-bridge .image-build/usr/local/bin/reduct-cli
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3

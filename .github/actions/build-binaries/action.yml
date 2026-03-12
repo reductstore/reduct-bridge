@@ -36,17 +36,17 @@ runs:
       run: rustup target add ${{ inputs.target }}
 
     - name: Install gcc
-      if: ${{ startsWith(matrix.os, 'ubuntu-') }}
+      if: ${{ startsWith(inputs.os, 'ubuntu-') }}
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y ${{ matrix.compiler }}
+        sudo apt-get install -y ${{ inputs.compiler }}
 
     - name: Install gcc
-      if: ${{ startsWith(matrix.os, 'macos-') && matrix.compiler != '' }}
+      if: ${{ startsWith(inputs.os, 'macos-') && inputs.compiler != '' }}
       shell: bash
       run: |
-        brew install ${{ matrix.compiler }}
+        brew install ${{ inputs.compiler }}
 
     - name: AWS Credentials and Cargo Cache
       uses: ./.github/actions/aws-cargo-cache
@@ -91,12 +91,12 @@ runs:
 
     - name: Build and export tests (PR)
       if: github.event_name == 'pull_request'
-      run: cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --lib
+      run: cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --bins
       shell: bash
 
     - name: Build and export tests (Release)
       if: github.event_name != 'pull_request'
-      run: cargo export target/${{ inputs.target }}/tests -- test --profile release --target ${{ inputs.target }} --lib
+      run: cargo export target/${{ inputs.target }}/tests -- test --profile release --target ${{ inputs.target }} --bins
       shell: bash
 
     - name: Upload tests
