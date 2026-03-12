@@ -19,6 +19,7 @@ runs:
         BUCKET="ros-it"
         ALIAS="it"
         EXPORT_DIR="/tmp/ros-it-export"
+        ATTACH_EXPORT_DIR="/tmp/ros-it-attach-export"
         BRIDGE_CFG="${GITHUB_WORKSPACE}/.github/configs/ros1_input_it.toml"
         BRIDGE_LOG="/tmp/reduct-bridge-it.log"
 
@@ -97,7 +98,34 @@ runs:
           cat "$first_meta"
           exit 1
         fi
-        echo "=== [ros1-it] Verification passed: camera-raw has x label ==="
+
+        echo "=== [ros1-it] Verifying ROS attachment payload ==="
+        rm -rf "$ATTACH_EXPORT_DIR"
+        mkdir -p "$ATTACH_EXPORT_DIR"
+        /tmp/reduct-cli cp "$ALIAS/$BUCKET" "$ATTACH_EXPORT_DIR" -n 'camera-raw/$meta' -l 5 -m
+
+        attach_meta="$(find "$ATTACH_EXPORT_DIR" -type f -name '*-meta.json' | head -n 1)"
+        if [[ -z "$attach_meta" ]]; then
+          echo "No attachment metadata exported for camera-raw/$meta"
+          exit 1
+        fi
+        if ! jq -e '.labels.key == "$ros"' "$attach_meta" >/dev/null; then
+          echo "Attachment key is not \$ros:"
+          cat "$attach_meta"
+          exit 1
+        fi
+
+        attach_payload="$(find "$ATTACH_EXPORT_DIR" -type f ! -name '*-meta.json' | head -n 1)"
+        if [[ -z "$attach_payload" ]]; then
+          echo "No attachment payload exported for camera-raw/$meta"
+          exit 1
+        fi
+        if ! jq -e '.encoding == "ros1" and (.schema | type == "string") and (.topic == "/camra/raw") and (.schema_name | type == "string")' "$attach_payload" >/dev/null; then
+          echo "Invalid ROS attachment payload:"
+          cat "$attach_payload"
+          exit 1
+        fi
+        echo "=== [ros1-it] Verification passed: camera-raw has x label and ROS attachment ==="
 
     - name: Print reduct-bridge logs
       if: ${{ always() }}

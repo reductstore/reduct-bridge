@@ -1,5 +1,5 @@
 use crate::input::InputLauncher;
-use crate::message::{Message, Record};
+use crate::message::{Attachment, Message, Record};
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
@@ -281,6 +281,32 @@ impl TopicRuntime {
                 self.message_type_hint,
                 self.topic_name,
                 ros_message_type.as_deref().unwrap_or("<unknown>")
+            );
+        }
+
+        let schema_name = ros_message_type.unwrap_or_else(|| self.message_type_hint.clone());
+        let schema = headers
+            .get("message_definition")
+            .cloned()
+            .unwrap_or_else(String::new);
+        let attachment_payload = serde_json::json!({
+            "encoding": "ros1",
+            "schema": schema,
+            "topic": self.topic_name,
+            "schema_name": schema_name,
+        });
+        let attachment = Attachment {
+            entry_name: self.topic_cfg.entry_name.clone(),
+            key: "$ros".to_string(),
+            payload: attachment_payload,
+        };
+        if let Err(err) = self
+            .pipeline_tx
+            .blocking_send(Message::Attachment(attachment))
+        {
+            warn!(
+                "Failed to forward ROS attachment for topic '{}' to pipeline: {}",
+                self.topic_name, err
             );
         }
 

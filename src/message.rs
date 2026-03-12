@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use serde_json::Value;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -10,8 +11,15 @@ pub struct Record {
 }
 
 #[derive(Debug, Clone)]
+pub struct Attachment {
+    pub entry_name: String,
+    pub key: String,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone)]
 pub enum Message {
     Data(Record),
-    Attachment,
+    Attachment(Attachment),
     Stop,
 }

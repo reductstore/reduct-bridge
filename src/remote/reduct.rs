@@ -1,4 +1,4 @@
-use crate::message::{Message, Record};
+use crate::message::{Attachment, Message, Record};
 use crate::remote::RemoteInstanceLauncher;
 use anyhow::{Error, anyhow, bail};
 use log::{debug, info, warn};
@@ -94,6 +94,20 @@ impl ReductInstance {
             }
         }
     }
+
+    async fn write_attachment(bucket: &Bucket, attachment: Attachment) {
+        let mut attachments = std::collections::HashMap::new();
+        attachments.insert(attachment.key, attachment.payload);
+        if let Err(err) = bucket
+            .write_attachments(&attachment.entry_name, attachments)
+            .await
+        {
+            warn!(
+                "Failed to write attachment for entry '{}': {}",
+                attachment.entry_name, err
+            );
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -149,13 +163,13 @@ impl RemoteInstanceLauncher for ReductInstance {
                                     Self::flush_batch(&bucket, &mut batch).await;
                                 }
                             }
+                            Some(Message::Attachment(attachment)) => {
+                                Self::write_attachment(&bucket, attachment).await;
+                            }
                             Some(Message::Stop) => {
                                 info!("Stop message received, flushing Reduct batch before shutdown");
                                 Self::flush_batch(&bucket, &mut batch).await;
                                 break;
-                            }
-                            Some(other) => {
-                                debug!("Ignoring unsupported remote message: {:?}", other);
                             }
                             None => {
                                 info!("Remote input channel closed, flushing Reduct batch before shutdown");
