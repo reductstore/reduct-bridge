@@ -26,11 +26,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: arduino/setup-protoc@v3
-      with:
-        version: '26.x'
-        repo-token: ${{ inputs.action_github_token }}
-
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -53,8 +48,6 @@ runs:
       run: |
         brew install ${{ matrix.compiler }}
 
-    - uses: ilammy/setup-nasm@v1
-
     - name: AWS Credentials and Cargo Cache
       uses: ./.github/actions/aws-cargo-cache
       with:
@@ -62,7 +55,6 @@ runs:
         profile: ${{ github.event_name == 'pull_request' && 'ci' || 'release' }}
         access-key-id: ${{ inputs.access-key-id }}
         secret-access-key: ${{ inputs.secret-access-key }}
-
 
     - name: Install cargo-export
       shell: bash
