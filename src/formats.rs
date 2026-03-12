@@ -1,4 +1,4 @@
-// Copyright 2026 ReductSoftware UG
+// Copyright 2026 ReductStore
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,28 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use bytes::Bytes;
-use serde_json::Value;
-use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
-pub struct Record {
-    pub entry_name: String,
-    pub content: Bytes,
-    pub content_type: Option<String>,
-    pub labels: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Attachment {
-    pub entry_name: String,
-    pub key: String,
-    pub payload: Value,
-}
-
-#[derive(Debug, Clone)]
-pub enum Message {
-    Data(Record),
-    Attachment(Attachment),
-    Stop,
-}
+#[cfg(feature = "ros1")]
+pub mod ros1;

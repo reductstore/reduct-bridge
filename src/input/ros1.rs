@@ -1,9 +1,23 @@
+// Copyright 2026 ReductSoftware UG
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+use crate::formats::ros1::msg_to_json;
 use crate::input::InputLauncher;
 use crate::message::{Attachment, Message, Record};
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
-use rosrust::{DynamicMsg, MsgMessage, MsgValue, RawMessage};
+use rosrust::{DynamicMsg, RawMessage};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -121,41 +135,6 @@ impl Ros1Instance {
         labels
     }
 
-    fn ros_msg_to_json(message: &MsgMessage) -> Value {
-        let mut map = serde_json::Map::new();
-        for (key, value) in message {
-            map.insert(key.clone(), Self::ros_value_to_json(value));
-        }
-        Value::Object(map)
-    }
-
-    fn ros_value_to_json(value: &MsgValue) -> Value {
-        match value {
-            MsgValue::Bool(v) => Value::Bool(*v),
-            MsgValue::I8(v) => Value::Number((*v).into()),
-            MsgValue::I16(v) => Value::Number((*v).into()),
-            MsgValue::I32(v) => Value::Number((*v).into()),
-            MsgValue::I64(v) => Value::Number((*v).into()),
-            MsgValue::U8(v) => Value::Number((*v).into()),
-            MsgValue::U16(v) => Value::Number((*v).into()),
-            MsgValue::U32(v) => Value::Number((*v).into()),
-            MsgValue::U64(v) => Value::Number((*v).into()),
-            MsgValue::F32(v) => serde_json::Number::from_f64(*v as f64)
-                .map(Value::Number)
-                .unwrap_or(Value::Null),
-            MsgValue::F64(v) => serde_json::Number::from_f64(*v)
-                .map(Value::Number)
-                .unwrap_or(Value::Null),
-            MsgValue::String(v) => Value::String(v.clone()),
-            MsgValue::Time(v) => serde_json::json!({ "sec": v.sec, "nsec": v.nsec }),
-            MsgValue::Duration(v) => serde_json::json!({ "sec": v.sec, "nsec": v.nsec }),
-            MsgValue::Array(items) => {
-                Value::Array(items.iter().map(Self::ros_value_to_json).collect())
-            }
-            MsgValue::Message(message) => Self::ros_msg_to_json(message),
-        }
-    }
-
     fn default_content_type() -> &'static str {
         "application/ros1"
     }
@@ -200,7 +179,7 @@ impl Ros1Instance {
             Ok(map) => {
                 if let Some(decoder) = map.get(publisher_id) {
                     match decoder.parser.decode(Cursor::new(msg_bytes)) {
-                        Ok(value) => Some(Self::ros_msg_to_json(&value)),
+                        Ok(value) => Some(msg_to_json(&value)),
                         Err(err) => {
                             warn!(
                                 "Failed to decode ROS message for topic '{}' from '{}': {}",
