@@ -25,6 +25,11 @@ labels = [
     { static = { source = "ros1" } }
 ]
 
+[[inputs.ros.ros_local.topics]]
+name = "/camera/*"
+entry_name = "camera"
+message_type = "*"
+
 [inputs.shell.shell_local]
 repeat_interval = 10
 command = "echo \"Payload, $(date --rfc-3339=ns)\""

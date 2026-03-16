@@ -25,6 +25,8 @@ use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{Sender, channel};
 
+mod wildcard;
+
 const CHANNEL_SIZE: usize = 1024;
 const DEFAULT_QUEUE_SIZE: usize = 128;
 
@@ -347,8 +349,16 @@ impl InputLauncher for Ros1Instance {
             }
         }
 
+        let resolved_topics = wildcard::resolve_topics_for_subscription(&cfg.topics)?;
+        if resolved_topics.is_empty() {
+            warn!(
+                "ROS input '{}' has no resolved topics to subscribe after wildcard expansion",
+                cfg.node_name
+            );
+        }
+
         let mut subscribers = Vec::new();
-        for topic_cfg in cfg.topics.clone() {
+        for topic_cfg in resolved_topics {
             let topic_name = topic_cfg.name.clone();
             let message_type_hint = topic_cfg.message_type.clone();
             let needs_dynamic_labels = topic_cfg
