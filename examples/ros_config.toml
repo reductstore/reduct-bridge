@@ -1,19 +1,44 @@
+# ReductStore remote destination.
 [[remotes.reduct]]
+# Unique remote name referenced by pipelines.<name>.remote.
 name = "local"
+# ReductStore base URL.
 url = "http://localhost:8383"
+# API token used for authentication.
 token_api = "***"
+# Target bucket for all records from this remote.
 bucket = "my-bucket"
+# Required key prefix inside the bucket.
 prefix = "ros_data/"
+# Optional: flush when record count exceeds this value (default: 80, must be > 0).
+batch_max_records = 80
+# Optional: flush when buffered payload size exceeds this value in bytes
+# (default: 8388608, must be > 0).
+batch_max_size_bytes = 8388608
+# Optional: periodic flush interval in milliseconds (default: 1000, must be > 0).
+batch_max_interval_ms = 1000
 
 
+# ROS1 input configuration.
+# Structure: [inputs.ros.<input_name>]
 [inputs.ros.ros_local]
+# ROS master URI (required).
 uri = "http://localhost:11311"
+# ROS node name for reduct-bridge (required).
 node_name = "reduct-bridge"
+# Subscriber queue size (optional, default: 128, must be > 0).
+queue_size = 128
 
+# List of subscribed topics for this input.
 [[inputs.ros.ros_local.topics]]
+# Topic name (required). Supports wildcard '*', e.g. "/camera/*".
 name = "/chatter"
+# Entry name in ReductStore where messages are written (optional).
+# If omitted, the topic name is used as entry_name.
 entry_name = "time"
-message_type = "std_msgs/String"
+# Optional label rules:
+# - { field = "...", label = "..." } extracts dynamic value from decoded ROS message.
+# - { static = { k = "v" } } adds constant labels.
 labels = [
     { field = "data", label = "message" },
     { static = { source = "ros1" } }
@@ -22,10 +47,15 @@ labels = [
 
 # Shell inputs
 [inputs.shell.shell_timestamp]
+# Repeat command execution every N seconds.
 repeat_interval = 10
+# Command output becomes record content.
 command = "echo \"Time: $(date --rfc-3339=ns)\""
+# ReductStore entry name for this input output.
 entry_name = "time"
+# Record content type.
 content_type = "text/plain"
+# Optional shell label rules (input-specific format).
 labels = [
     { regex = "Time: (.*)", labels = ["timestamp"] },
     { static = { source = "shell_command" } }
@@ -40,13 +70,16 @@ content_type = "text/plain"
 
 # Pipelines
 [pipelines.telemetry]
+# Which remote section to use.
 remote = "local"
+# Inputs included in this pipeline.
 inputs = ["ros_local"]
 
 
 [pipelines.shell_pipeline]
 remote = "local"
 inputs = ["shell_timestamp", "shell_echo"]
+# Optional pipeline-level label routing rules.
 labels = [
     { static = { source = "shell_pipeline" }, to = "*" },
     { from = "time", labels = ["timestamp"], to = "echo" }

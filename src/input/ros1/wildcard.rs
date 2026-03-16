@@ -118,8 +118,7 @@ mod tests {
     fn topic(name: &str, entry_name: &str) -> Ros1TopicConfig {
         Ros1TopicConfig {
             name: name.to_string(),
-            entry_name: entry_name.to_string(),
-            message_type: "std_msgs/String".to_string(),
+            entry_name: Some(entry_name.to_string()),
             labels: Vec::new(),
         }
     }
@@ -167,8 +166,8 @@ mod tests {
 
         assert_eq!(resolved.len(), 2);
         assert_eq!(resolved[0].name, "/camera/front");
-        assert_eq!(resolved[0].entry_name, "front");
+        assert_eq!(resolved[0].entry_name, Some("front".to_string()));
         assert_eq!(resolved[1].name, "/camera/rear");
-        assert_eq!(resolved[1].entry_name, "camera");
+        assert_eq!(resolved[1].entry_name, Some("camera".to_string()));
     }
 }

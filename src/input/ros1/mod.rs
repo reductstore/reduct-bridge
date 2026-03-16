@@ -42,9 +42,8 @@ pub struct Ros1Config {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Ros1TopicConfig {
     pub name: String,
-    pub entry_name: String,
-    #[serde(default = "default_message_type")]
-    pub message_type: String,
+    #[serde(default)]
+    pub entry_name: Option<String>,
     #[serde(default)]
     pub labels: Vec<Ros1LabelRule>,
 }
@@ -65,7 +64,7 @@ struct PublisherDecoder {
 struct TopicRuntime {
     topic_cfg: Ros1TopicConfig,
     topic_name: String,
-    message_type_hint: String,
+    entry_name: String,
     needs_dynamic_labels: bool,
     decoders: Arc<Mutex<HashMap<String, PublisherDecoder>>>,
     pipeline_tx: Sender<Message>,
@@ -73,10 +72,6 @@ struct TopicRuntime {
 
 fn default_queue_size() -> usize {
     DEFAULT_QUEUE_SIZE
-}
-
-fn default_message_type() -> String {
-    "std_msgs/String".to_string()
 }
 
 pub struct Ros1Instance {
@@ -226,7 +221,7 @@ impl TopicRuntime {
         };
 
         let record = Record {
-            entry_name: self.topic_cfg.entry_name.clone(),
+            entry_name: self.entry_name.clone(),
             content: msg_bytes.into(),
             content_type: Some(Ros1Instance::default_content_type().to_string()),
             labels,
@@ -252,20 +247,7 @@ impl TopicRuntime {
             }
         };
 
-        let ros_message_type = headers.get("type").cloned();
-        if !self.message_type_hint.is_empty()
-            && self.message_type_hint != "*"
-            && ros_message_type.as_deref() != Some(self.message_type_hint.as_str())
-        {
-            warn!(
-                "Configured message_type '{}' for topic '{}' differs from ROS type '{}'",
-                self.message_type_hint,
-                self.topic_name,
-                ros_message_type.as_deref().unwrap_or("<unknown>")
-            );
-        }
-
-        let schema_name = ros_message_type.unwrap_or_else(|| self.message_type_hint.clone());
+        let schema_name = headers.get("type").cloned().unwrap_or_else(String::new);
         let schema = headers
             .get("message_definition")
             .cloned()
@@ -277,7 +259,7 @@ impl TopicRuntime {
             "schema_name": schema_name,
         });
         let attachment = Attachment {
-            entry_name: self.topic_cfg.entry_name.clone(),
+            entry_name: self.entry_name.clone(),
             key: "$ros".to_string(),
             payload: attachment_payload,
         };
@@ -344,7 +326,11 @@ impl InputLauncher for Ros1Instance {
             if topic_cfg.name.trim().is_empty() {
                 bail!("ROS topic name must not be empty");
             }
-            if topic_cfg.entry_name.trim().is_empty() {
+            if topic_cfg
+                .entry_name
+                .as_ref()
+                .is_some_and(|entry_name| entry_name.trim().is_empty())
+            {
                 bail!("ROS topic entry_name must not be empty");
             }
         }
@@ -360,7 +346,10 @@ impl InputLauncher for Ros1Instance {
         let mut subscribers = Vec::new();
         for topic_cfg in resolved_topics {
             let topic_name = topic_cfg.name.clone();
-            let message_type_hint = topic_cfg.message_type.clone();
+            let entry_name = topic_cfg
+                .entry_name
+                .clone()
+                .unwrap_or_else(|| topic_name.clone());
             let needs_dynamic_labels = topic_cfg
                 .labels
                 .iter()
@@ -368,7 +357,7 @@ impl InputLauncher for Ros1Instance {
             let runtime = Arc::new(TopicRuntime {
                 topic_cfg: topic_cfg.clone(),
                 topic_name: topic_name.clone(),
-                message_type_hint,
+                entry_name,
                 needs_dynamic_labels,
                 decoders: Arc::new(Mutex::new(HashMap::new())),
                 pipeline_tx: pipeline_tx.clone(),
