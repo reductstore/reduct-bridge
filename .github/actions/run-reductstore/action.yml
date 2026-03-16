@@ -1,0 +1,64 @@
+name: "Run ReductStore"
+description: "Starts a ReductStore container and waits until /api/v1/alive responds."
+inputs:
+  container_name:
+    description: "Container name"
+    required: false
+    default: "reduct-store-it"
+  host_port:
+    description: "Host port mapped to ReductStore 8383"
+    required: false
+    default: "8383"
+  image:
+    description: "ReductStore image"
+    required: false
+    default: "reduct/store:main"
+  log_level:
+    description: "RS_LOG_LEVEL value"
+    required: false
+    default: "DEBUG"
+  health_retries:
+    description: "Number of health check retries"
+    required: false
+    default: "30"
+  health_interval_seconds:
+    description: "Seconds between health checks"
+    required: false
+    default: "1"
+runs:
+  using: "composite"
+  steps:
+    - name: Start ReductStore
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        CONTAINER="${{ inputs.container_name }}"
+        HOST_PORT="${{ inputs.host_port }}"
+        IMAGE="${{ inputs.image }}"
+        LOG_LEVEL="${{ inputs.log_level }}"
+        RETRIES="${{ inputs.health_retries }}"
+        INTERVAL="${{ inputs.health_interval_seconds }}"
+        REDUCT_URL="http://127.0.0.1:${HOST_PORT}"
+
+        docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+
+        echo "=== [reductstore] Starting ${IMAGE} as ${CONTAINER} on ${HOST_PORT} ==="
+        docker run -d --rm --name "${CONTAINER}" \
+          -e RS_LOG_LEVEL="${LOG_LEVEL}" \
+          -p "${HOST_PORT}:8383" \
+          "${IMAGE}"
+
+        echo "=== [reductstore] Waiting for health at ${REDUCT_URL}/api/v1/alive ==="
+        for _ in $(seq 1 "${RETRIES}"); do
+          if curl -sf "${REDUCT_URL}/api/v1/alive" >/dev/null; then
+            echo "=== [reductstore] ReductStore is alive ==="
+            sleep 1
+            exit 0
+          fi
+          sleep "${INTERVAL}"
+        done
+
+        echo "ReductStore did not become healthy in time"
+        docker logs "${CONTAINER}" || true
+        exit 1

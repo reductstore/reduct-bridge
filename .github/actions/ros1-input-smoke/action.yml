@@ -1,0 +1,107 @@
+name: "ROS1 Input Smoke Test"
+description: "Runs reduct-bridge against ROS1 publishers and validates ReductStore records and labels."
+inputs:
+  bridge_binary:
+    description: "Path to reduct-bridge binary"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - uses: ./.github/actions/run-reductstore
+      with:
+        container_name: reduct-store-it
+        host_port: 8383
+        log_level: DEBUG
+
+    - name: Run ROS1 smoke test
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        BRIDGE_BIN="${{ inputs.bridge_binary }}"
+        ROS_CONTAINER="ros-master-it"
+        REDUCT_URL="http://127.0.0.1:8383"
+        BUCKET="ros-it"
+        BRIDGE_CFG="${GITHUB_WORKSPACE}/.github/configs/ros1_input_it.toml"
+        BRIDGE_LOG="/tmp/reduct-bridge-it.log"
+
+        rm -f /tmp/reduct-bridge-it.pid "$BRIDGE_LOG"
+        docker rm -f "$ROS_CONTAINER" >/dev/null 2>&1 || true
+
+        echo "=== [ros1-it] Creating bucket via ReductStore API ==="
+        curl -sf -X POST "${REDUCT_URL}/api/v1/b/${BUCKET}" \
+          -H "Content-Type: application/json" \
+          -d '{}' >/dev/null || true
+
+        echo "=== [ros1-it] Starting ROS1 master ==="
+        docker run -d --rm --name "$ROS_CONTAINER" --network host ros:noetic-ros-base roscore
+        sleep 5
+
+        echo "=== [ros1-it] Starting reduct-bridge in debug mode ==="
+        chmod +x "$BRIDGE_BIN"
+        RUST_LOG=debug "$BRIDGE_BIN" "$BRIDGE_CFG" >"$BRIDGE_LOG" 2>&1 &
+        BRIDGE_PID=$!
+        echo "$BRIDGE_PID" >/tmp/reduct-bridge-it.pid
+        sleep 4
+
+        echo "=== [ros1-it] Publishing ROS messages ==="
+        docker run --rm --network host \
+          -v "${GITHUB_WORKSPACE}/.github/scripts:/scripts:ro" \
+          ros:noetic-ros-base \
+          python3 /scripts/ros1_publish.py --count 8 --period 0.2
+
+        echo "=== [ros1-it] Stopping bridge and waiting for flush ==="
+        sleep 2
+        kill -INT "$BRIDGE_PID"
+        wait "$BRIDGE_PID"
+        rm -f /tmp/reduct-bridge-it.pid
+
+        echo "=== [ros1-it] Verifying camera-raw label using ReductStore API ==="
+        bucket_json="$(curl -sf "${REDUCT_URL}/api/v1/b/${BUCKET}")"
+        camera_ts="$(echo "$bucket_json" | jq -r '.entries[] | select(.name=="camera-raw") | .latest_record')"
+        if [[ -z "$camera_ts" || "$camera_ts" == "null" ]]; then
+          echo "camera-raw entry was not found in bucket metadata"
+          echo "$bucket_json"
+          exit 1
+        fi
+
+        camera_head="$(curl -sfI "${REDUCT_URL}/api/v1/b/${BUCKET}/camera-raw?ts=${camera_ts}")"
+        if ! echo "$camera_head" | grep -Eiq '^x-reduct-label-x:\s*.+$'; then
+          echo "x label is missing in camera-raw record headers:"
+          echo "$camera_head"
+          exit 1
+        fi
+
+        echo "=== [ros1-it] Verifying ROS attachment payload ==="
+        attach_head="$(curl -sfI "${REDUCT_URL}/api/v1/b/${BUCKET}/camera-raw/\$meta")"
+        if ! echo "$attach_head" | grep -Fq 'x-reduct-label-key: $ros'; then
+          echo "Attachment key \$ros is missing in attachment headers:"
+          echo "$attach_head"
+          exit 1
+        fi
+
+        attach_payload="$(curl -sf "${REDUCT_URL}/api/v1/b/${BUCKET}/camera-raw/\$meta")"
+        if ! echo "$attach_payload" | jq -e '.encoding == "ros1" and (.schema | type == "string") and (.topic == "/camra/raw") and (.schema_name | type == "string")' >/dev/null; then
+          echo "Invalid ROS attachment payload:"
+          echo "$attach_payload"
+          exit 1
+        fi
+        echo "=== [ros1-it] Verification passed: camera-raw has x label and ROS attachment ==="
+
+    - name: Print reduct-bridge logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [ros1-it] Final logs: reduct-bridge ==="
+        if [[ -f /tmp/reduct-bridge-it.log ]]; then
+          cat /tmp/reduct-bridge-it.log || true
+        else
+          echo "bridge log file not found: /tmp/reduct-bridge-it.log"
+        fi
+
+    - name: Print reductstore logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [ros1-it] Final logs: reductstore ==="
+        docker logs reduct-store-it || true

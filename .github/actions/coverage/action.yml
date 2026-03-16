@@ -1,0 +1,47 @@
+name: 'Generate Code Coverage'
+description: 'Downloads and runs test binaries with coverage instrumentation for a given target.'
+inputs:
+  os:
+    description: 'Operating system.'
+    required: true
+  target:
+    description: 'Target triple.'
+    required: true
+  action_github_token:
+    description: 'GitHub token for authentication.'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      shell: bash
+      run: rustup update stable
+
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
+
+    - name: Run Docker-backed ReductStore test (CI feature)
+      shell: bash
+      env:
+        CARGO_TERM_COLOR: always
+        RUST_LOG: debug
+      run: |
+        set -e -x
+        cargo test --features ci docker_reductstore_roundtrip_data_and_attachment -- --nocapture
+
+    - name: Run code coverage
+      shell: bash
+      env:
+        CARGO_TERM_COLOR: always
+        RUST_LOG: debug
+      run: |
+        set -e -x
+        cargo llvm-cov --workspace --lcov --output-path lcov.info
+
+    - name: Upload coverage artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: lcov.info
+        path: lcov.info

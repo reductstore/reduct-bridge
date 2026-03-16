@@ -1,0 +1,40 @@
+[package]
+name = "reduct-bridge"
+version = "0.1.0"
+edition = "2024"
+
+
+[features]
+default = ["ros1", "shell"]
+ros1 = ["dep:rosrust"]
+shell = []
+ci = []
+
+
+[dependencies]
+tokio = { version = "1.49.0", features = ["macros", "rt", "signal", "sync", "time"] }
+async-trait = "0.1.89"
+toml = "1.0.3"
+serde = { version = "1.0.228", features = ["derive"] }
+bytes = "1.11.1"
+reduct-rs = { git="https://github.com/reductstore/reduct-rs.git" }
+anyhow = "1.0.102"
+log = "0.4.28"
+env_logger = "0.11.8"
+regex = "1.12.2"
+serde_json = "1.0.145"
+rosrust = { version = "0.9.12", optional = true }
+
+
+[dev-dependencies]
+rstest = "0.25.0"
+futures-util = "0.3.32"
+
+
+[profile.ci]
+inherits = "dev"
+opt-level = 0
+codegen-units = 256
+debug = 1
+incremental = true
+lto = false

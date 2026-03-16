@@ -1,0 +1,93 @@
+name: "Shell Input Smoke Test"
+description: "Runs reduct-bridge shell input and validates ReductStore records and labels."
+inputs:
+  bridge_binary:
+    description: "Path to reduct-bridge binary"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - uses: ./.github/actions/run-reductstore
+      with:
+        container_name: reduct-store-shell-it
+        host_port: 8383
+        log_level: DEBUG
+
+    - name: Run shell input smoke test
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        BRIDGE_BIN="${{ inputs.bridge_binary }}"
+        REDUCT_URL="http://127.0.0.1:8383"
+        BUCKET="shell-it"
+        BRIDGE_CFG="${GITHUB_WORKSPACE}/.github/configs/shell_input_it.toml"
+        BRIDGE_LOG="/tmp/reduct-bridge-shell-it.log"
+
+        rm -f /tmp/reduct-bridge-shell-it.pid "$BRIDGE_LOG"
+
+        echo "=== [shell-it] Creating bucket via ReductStore API ==="
+        curl -sf -X POST "${REDUCT_URL}/api/v1/b/${BUCKET}" \
+          -H "Content-Type: application/json" \
+          -d '{}' >/dev/null || true
+
+        echo "=== [shell-it] Starting reduct-bridge in debug mode ==="
+        chmod +x "$BRIDGE_BIN"
+        RUST_LOG=debug "$BRIDGE_BIN" "$BRIDGE_CFG" >"$BRIDGE_LOG" 2>&1 &
+        BRIDGE_PID=$!
+        echo "$BRIDGE_PID" >/tmp/reduct-bridge-shell-it.pid
+
+        echo "=== [shell-it] Waiting for shell records ==="
+        sleep 5
+
+        echo "=== [shell-it] Stopping bridge and waiting for flush ==="
+        kill -INT "$BRIDGE_PID"
+        wait "$BRIDGE_PID"
+        rm -f /tmp/reduct-bridge-shell-it.pid
+
+        echo "=== [shell-it] Verifying shell-input record and labels ==="
+        bucket_json="$(curl -sf "${REDUCT_URL}/api/v1/b/${BUCKET}")"
+        shell_ts="$(echo "$bucket_json" | jq -r '.entries[] | select(.name=="shell-input") | .latest_record')"
+        if [[ -z "$shell_ts" || "$shell_ts" == "null" ]]; then
+          echo "shell-input entry was not found in bucket metadata"
+          echo "$bucket_json"
+          exit 1
+        fi
+
+        shell_head="$(curl -sfI "${REDUCT_URL}/api/v1/b/${BUCKET}/shell-input?ts=${shell_ts}")"
+        if ! echo "$shell_head" | grep -Eiq '^x-reduct-label-source:\s*shell_command\s*$'; then
+          echo "source label is missing in shell-input record headers:"
+          echo "$shell_head"
+          exit 1
+        fi
+        if ! echo "$shell_head" | grep -Eiq '^x-reduct-label-timestamp:\s*.+$'; then
+          echo "timestamp label is missing in shell-input record headers:"
+          echo "$shell_head"
+          exit 1
+        fi
+
+        shell_payload="$(curl -sf "${REDUCT_URL}/api/v1/b/${BUCKET}/shell-input?ts=${shell_ts}")"
+        if ! echo "$shell_payload" | grep -Eq '^Payload, .+$'; then
+          echo "Unexpected shell payload:"
+          echo "$shell_payload"
+          exit 1
+        fi
+        echo "=== [shell-it] Verification passed: shell-input has payload and labels ==="
+
+    - name: Print reduct-bridge logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [shell-it] Final logs: reduct-bridge ==="
+        if [[ -f /tmp/reduct-bridge-shell-it.log ]]; then
+          cat /tmp/reduct-bridge-shell-it.log || true
+        else
+          echo "bridge log file not found: /tmp/reduct-bridge-shell-it.log"
+        fi
+
+    - name: Print reductstore logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [shell-it] Final logs: reductstore ==="
+        docker logs reduct-store-shell-it || true
