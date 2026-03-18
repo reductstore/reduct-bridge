@@ -55,6 +55,17 @@ pub(super) fn resolve_topic_patterns(
     for topic_cfg in configured_topics {
         let pattern = topic_cfg.name.as_str();
         if pattern.contains('*') {
+            continue;
+        }
+
+        if subscribed_topics.insert(pattern.to_string()) {
+            resolved.push(topic_cfg.clone());
+        }
+    }
+
+    for topic_cfg in configured_topics {
+        let pattern = topic_cfg.name.as_str();
+        if pattern.contains('*') {
             for topic_name in available_topics {
                 if wildcard_match(pattern, topic_name)
                     && subscribed_topics.insert(topic_name.clone())
@@ -64,8 +75,6 @@ pub(super) fn resolve_topic_patterns(
                     resolved.push(expanded);
                 }
             }
-        } else if subscribed_topics.insert(pattern.to_string()) {
-            resolved.push(topic_cfg.clone());
         }
     }
 
@@ -161,5 +170,22 @@ mod tests {
             names,
             vec!["/camera/front", "/camera/rear", "/lidar/points"]
         );
+    }
+
+    #[test]
+    fn resolve_topic_patterns_prefers_exact_config_over_wildcard() {
+        let configured = vec![
+            topic("/camera/*", "camera"),
+            topic("/camera/front", "front"),
+        ];
+        let available = vec!["/camera/front".to_string(), "/camera/rear".to_string()];
+
+        let resolved = resolve_topic_patterns(&configured, &available);
+
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0].name, "/camera/front");
+        assert_eq!(resolved[0].entry_name, Some("front".to_string()));
+        assert_eq!(resolved[1].name, "/camera/rear");
+        assert_eq!(resolved[1].entry_name, Some("camera".to_string()));
     }
 }
