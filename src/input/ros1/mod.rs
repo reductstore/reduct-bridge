@@ -112,6 +112,12 @@ impl Ros1Instance {
         "application/ros1"
     }
 
+    fn has_dynamic_labels(rules: &[Ros1LabelRule]) -> bool {
+        rules
+            .iter()
+            .any(|rule| matches!(rule, Ros1LabelRule::Field { .. }))
+    }
+
     fn try_init_ros(node_name: &str, master_uri: &str) -> Result<(), Error> {
         match std::env::var("ROS_MASTER_URI") {
             Ok(current) if current != master_uri => {
@@ -326,10 +332,7 @@ impl InputLauncher for Ros1Instance {
                 .entry_name
                 .clone()
                 .unwrap_or_else(|| topic_name.clone());
-            let needs_dynamic_labels = topic_cfg
-                .labels
-                .iter()
-                .any(|rule| matches!(rule, Ros1LabelRule::Field { .. }));
+            let needs_dynamic_labels = Self::has_dynamic_labels(&topic_cfg.labels);
             let runtime = Arc::new(TopicRuntime {
                 topic_cfg: topic_cfg.clone(),
                 topic_name: topic_name.clone(),

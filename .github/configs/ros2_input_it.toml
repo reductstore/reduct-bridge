@@ -1,0 +1,24 @@
+[[remotes.reduct]]
+name = "local"
+url = "http://127.0.0.1:8383"
+token_api = ""
+bucket = "ros2-it"
+prefix = ""
+batch_max_interval_ms = 100
+
+[inputs.ros2.ros2_local]
+node_name = "reduct_bridge_ros2_it"
+queue_size = 128
+schema_paths = ["/opt/ros/jazzy"]
+
+[[inputs.ros2.ros2_local.topics]]
+name = "/chatter"
+entry_name = "chatter"
+labels = [
+    { field = "data", label = "message" },
+    { static = { source = "ros2" } }
+]
+
+[pipelines.telemetry]
+inputs = ["ros2_local"]
+remote = "local"

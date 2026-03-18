@@ -94,6 +94,12 @@ impl Ros2Instance {
         "application/cdr"
     }
 
+    fn has_dynamic_labels(rules: &[Ros2LabelRule]) -> bool {
+        rules
+            .iter()
+            .any(|rule| matches!(rule, Ros2LabelRule::Field { .. }))
+    }
+
     fn create_context(cfg: &Ros2Config) -> Result<Context, Error> {
         let init = InitOptions::new().with_domain_id(cfg.domain_id);
         Context::new(std::env::args(), init)
@@ -209,10 +215,7 @@ impl Ros2Instance {
         let topic_name = topic_cfg.name.clone();
         let topic_type = Self::select_topic_type(&topic_name, topic_types)?;
         let schema = Self::load_schema_text(&topic_type, schema_paths)?;
-        let needs_dynamic_labels = topic_cfg
-            .labels
-            .iter()
-            .any(|rule| matches!(rule, Ros2LabelRule::Field { .. }));
+        let needs_dynamic_labels = Self::has_dynamic_labels(&topic_cfg.labels);
         let parser = if needs_dynamic_labels {
             Some(Arc::new(Ros2DynamicParser::new(&topic_type, &schema)?))
         } else {

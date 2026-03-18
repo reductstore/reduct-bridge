@@ -2021,6 +2021,7 @@ dependencies = [
 [[package]]
 name = "rclrs"
 version = "0.7.0"
+source = "git+https://github.com/reductstore/ros2_rust#bfd47780c33d51f9c0c708edb878b53814f9152d"
 dependencies = [
  "ament_rs",
  "async-std",
