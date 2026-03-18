@@ -33,6 +33,7 @@ runs:
         BRIDGE_LOG="/tmp/reduct-bridge-ros2-it.log"
         ROS2_PUB_LOG="/tmp/reduct-bridge-ros2-pub.log"
         ROS2_WARMUP_LOG="/tmp/reduct-bridge-ros2-warmup.log"
+        ROS2_PUBLISHER_SCRIPT="${GITHUB_WORKSPACE}/.github/scripts/ros2_publish.py"
 
         rm -f /tmp/reduct-bridge-ros2-it.pid "$BRIDGE_LOG" "$ROS2_PUB_LOG" "$ROS2_WARMUP_LOG"
 
@@ -42,7 +43,7 @@ runs:
           -d '{}' >/dev/null || true
 
         echo "=== [ros2-it] Starting warmup ROS2 publisher for topic discovery ==="
-        timeout 15s ros2 topic pub /chatter std_msgs/msg/String "{data: warmup}" >"$ROS2_WARMUP_LOG" 2>&1 &
+        timeout 15s python3 "$ROS2_PUBLISHER_SCRIPT" --message warmup --count 50 --period 0.2 >"$ROS2_WARMUP_LOG" 2>&1 &
         WARMUP_PID=$!
 
         echo "=== [ros2-it] Waiting for /chatter type to appear in ROS graph ==="
@@ -63,6 +64,11 @@ runs:
         BRIDGE_PID=$!
         echo "$BRIDGE_PID" >/tmp/reduct-bridge-ros2-it.pid
         sleep 4
+        if ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+          echo "reduct-bridge exited before ROS2 publish phase"
+          cat "$BRIDGE_LOG" || true
+          exit 1
+        fi
 
         if kill -0 "$WARMUP_PID" 2>/dev/null; then
           kill "$WARMUP_PID" 2>/dev/null || true
@@ -70,12 +76,23 @@ runs:
         fi
 
         echo "=== [ros2-it] Publishing ROS2 messages ==="
-        ros2 topic pub --times 8 /chatter std_msgs/msg/String "{data: hello_ros2}" >"$ROS2_PUB_LOG" 2>&1
+        python3 "$ROS2_PUBLISHER_SCRIPT" --message hello_ros2 --count 8 --period 0.2 >"$ROS2_PUB_LOG" 2>&1
 
         echo "=== [ros2-it] Stopping bridge and waiting for flush ==="
         sleep 2
-        kill -INT "$BRIDGE_PID"
-        wait "$BRIDGE_PID"
+        if kill -0 "$BRIDGE_PID" 2>/dev/null; then
+          kill -INT "$BRIDGE_PID"
+          for _ in $(seq 1 30); do
+            if ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+        fi
+        if kill -0 "$BRIDGE_PID" 2>/dev/null; then
+          echo "reduct-bridge did not stop after SIGINT"
+          exit 1
+        fi
         rm -f /tmp/reduct-bridge-ros2-it.pid
 
         echo "=== [ros2-it] Verifying chatter label using ReductStore API ==="
