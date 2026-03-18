@@ -24,9 +24,9 @@ runs:
       run: |
         set -e -x
         if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
-          export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
-          export AMENT_PYTHON_EXECUTABLE="${AMENT_PYTHON_EXECUTABLE:-python3}"
+          set +u
           source "${{ inputs.ros-setup-script }}"
+          set -u
         fi
         for f in ./tmp/tests/*; do
           # exclude proc-macro helper crates that are not directly executable tests

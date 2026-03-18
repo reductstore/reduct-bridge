@@ -38,9 +38,9 @@ runs:
       run: |
         set -e -x
         if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
-          export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
-          export AMENT_PYTHON_EXECUTABLE="${AMENT_PYTHON_EXECUTABLE:-python3}"
+          set +u
           source "${{ inputs.ros-setup-script }}"
+          set -u
         fi
         cargo test ${{ inputs.cargo-args }} docker_reductstore_roundtrip_data_and_attachment -- --nocapture
 
@@ -52,9 +52,9 @@ runs:
       run: |
         set -e -x
         if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
-          export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
-          export AMENT_PYTHON_EXECUTABLE="${AMENT_PYTHON_EXECUTABLE:-python3}"
+          set +u
           source "${{ inputs.ros-setup-script }}"
+          set -u
         fi
         cargo llvm-cov --workspace ${{ inputs.cargo-args }} --lcov --output-path lcov.info
 
