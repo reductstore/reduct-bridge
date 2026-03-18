@@ -5,7 +5,8 @@ edition = "2024"
 
 
 [features]
-default = ["shell", "ros1", "ros2"]
+default = ["shell"]
+all-inputs = ["shell", "ros1", "ros2"]
 ros1 = ["dep:rosrust"]
 ros2 = ["dep:rclrs", "dep:ros2_message"]
 shell = []

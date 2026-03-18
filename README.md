@@ -56,6 +56,25 @@ labels = [
 cargo install reduct-bridge
 ```
 
+`cargo install reduct-bridge` builds the default feature set, which includes only the `shell` input.
+
+To build additional inputs explicitly from source:
+
+```bash
+cargo build --no-default-features --features ros1
+cargo build --no-default-features --features ros2
+cargo build --no-default-features --features all-inputs
+```
+
+ROS2 builds require a local ROS2 installation and a sourced environment, for example:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cargo build --no-default-features --features ros2
+```
+
+For ROS2 builds, the installation must include the standard interface packages required by `rclrs`.
+
 ## Usage
 
 ```bash

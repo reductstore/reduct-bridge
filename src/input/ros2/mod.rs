@@ -1,3 +1,4 @@
+use crate::formats::json::{extract_json_path, value_to_label};
 use crate::formats::ros2::Ros2DynamicParser;
 use crate::input::InputLauncher;
 use crate::message::{Attachment, Message, Record};
@@ -15,6 +16,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{Sender, channel};
 
@@ -64,31 +66,6 @@ impl Ros2Instance {
         Self { cfg }
     }
 
-    fn extract_json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
-        let mut current = value;
-        for segment in path.split('.') {
-            if segment.is_empty() {
-                continue;
-            }
-            if let Ok(index) = segment.parse::<usize>() {
-                current = current.get(index)?;
-            } else {
-                current = current.get(segment)?;
-            }
-        }
-        Some(current)
-    }
-
-    fn value_to_label(value: &Value) -> String {
-        match value {
-            Value::Null => "null".to_string(),
-            Value::Bool(v) => v.to_string(),
-            Value::Number(v) => v.to_string(),
-            Value::String(v) => v.clone(),
-            other => other.to_string(),
-        }
-    }
-
     fn build_static_labels(rules: &[Ros2LabelRule]) -> HashMap<String, String> {
         let mut labels = HashMap::new();
         for rule in rules {
@@ -105,8 +82,8 @@ impl Ros2Instance {
         let mut labels = Self::build_static_labels(rules);
         for rule in rules {
             if let Ros2LabelRule::Field { field, label } = rule {
-                if let Some(value) = Self::extract_json_path(message, field) {
-                    labels.insert(label.clone(), Self::value_to_label(value));
+                if let Some(value) = extract_json_path(message, field) {
+                    labels.insert(label.clone(), value_to_label(value));
                 }
             }
         }
@@ -222,6 +199,198 @@ impl Ros2Instance {
                     .as_micros() as u64
             })
     }
+
+    fn prepare_topic_subscription(
+        topic_cfg: &Ros2TopicConfig,
+        topic_types: &HashMap<String, Vec<String>>,
+        schema_paths: &[PathBuf],
+        pipeline_tx: &Sender<Message>,
+    ) -> Result<(String, String, Option<Arc<Ros2DynamicParser>>), Error> {
+        let topic_name = topic_cfg.name.clone();
+        let topic_type = Self::select_topic_type(&topic_name, topic_types)?;
+        let schema = Self::load_schema_text(&topic_type, schema_paths)?;
+        let needs_dynamic_labels = topic_cfg
+            .labels
+            .iter()
+            .any(|rule| matches!(rule, Ros2LabelRule::Field { .. }));
+        let parser = if needs_dynamic_labels {
+            Some(Arc::new(Ros2DynamicParser::new(&topic_type, &schema)?))
+        } else {
+            None
+        };
+        let entry_name = topic_cfg
+            .entry_name
+            .clone()
+            .unwrap_or_else(|| topic_name.clone());
+
+        let attachment = Attachment {
+            entry_name: entry_name.clone(),
+            key: "$ros".to_string(),
+            payload: serde_json::json!({
+                "encoding": "cdr",
+                "topic": topic_name,
+                "schema_name": topic_type,
+                "schema": schema,
+            }),
+        };
+        if let Err(err) = pipeline_tx.blocking_send(Message::Attachment(attachment)) {
+            warn!(
+                "Failed to forward ROS2 attachment for topic '{}' to pipeline: {}",
+                topic_cfg.name, err
+            );
+        }
+
+        Ok((topic_type, entry_name, parser))
+    }
+
+    fn make_subscription_callback(
+        entry_name: String,
+        topic_name: String,
+        labels_cfg: Vec<Ros2LabelRule>,
+        parser: Option<Arc<Ros2DynamicParser>>,
+        pipeline_tx: Sender<Message>,
+    ) -> impl Fn(Vec<u8>, MessageInfo) + Send + Sync + 'static {
+        move |payload: Vec<u8>, info: MessageInfo| {
+            let decoded =
+                parser
+                    .as_ref()
+                    .and_then(|parser| match parser.decode_json(payload.as_slice()) {
+                        Ok(decoded) => Some(decoded),
+                        Err(err) => {
+                            warn!(
+                                "Failed to decode ROS2 payload for topic '{}': {}",
+                                topic_name, err
+                            );
+                            None
+                        }
+                    });
+
+            let labels = match decoded.as_ref() {
+                Some(message) => Self::build_labels(message, &labels_cfg),
+                None => Self::build_static_labels(&labels_cfg),
+            };
+            let timestamp = decoded
+                .as_ref()
+                .and_then(Self::extract_header_timestamp_us)
+                .unwrap_or_else(|| Self::message_info_timestamp_us(&info));
+
+            let record = Record {
+                entry_name: entry_name.clone(),
+                content: Bytes::from(payload),
+                content_type: Some(Self::default_content_type().to_string()),
+                labels,
+            };
+
+            let _ = timestamp;
+            if let Err(err) = pipeline_tx.blocking_send(Message::Data(record)) {
+                warn!(
+                    "Failed to forward ROS2 record for topic '{}' to pipeline: {}",
+                    topic_name, err
+                );
+            }
+        }
+    }
+
+    fn spawn_worker(
+        cfg: &Ros2Config,
+        pipeline_tx: Sender<Message>,
+        thread_stop: Arc<AtomicBool>,
+        ready_tx: std::sync::mpsc::SyncSender<Result<(), String>>,
+    ) -> Result<JoinHandle<()>, Error> {
+        let worker_cfg = cfg.clone();
+        std::thread::Builder::new()
+            .name(format!("ros2-{}", cfg.node_name))
+            .spawn(move || {
+                let startup = || -> Result<(), Error> {
+                    let context = Self::create_context(&worker_cfg)?;
+                    let mut executor = context.create_basic_executor();
+                    let node = executor.create_node(worker_cfg.node_name.as_str()).map_err(|err| {
+                        anyhow!(
+                            "Failed to create ROS2 node '{}': {}",
+                            worker_cfg.node_name,
+                            err
+                        )
+                    })?;
+
+                    info!(
+                        "Launching ROS2 input '{}' in domain {:?}",
+                        worker_cfg.node_name, worker_cfg.domain_id
+                    );
+
+                    let resolved_topics =
+                        wildcard::resolve_topics_for_subscription(&node, &worker_cfg.topics)?;
+                    if resolved_topics.is_empty() {
+                        warn!(
+                            "ROS2 input '{}' has no resolved topics to subscribe after wildcard expansion",
+                            worker_cfg.node_name
+                        );
+                    }
+
+                    let topic_types = wildcard::topic_types_by_name(&node)?;
+                    let mut subscriptions = Vec::new();
+
+                    for topic_cfg in resolved_topics {
+                        let topic_name = topic_cfg.name.clone();
+                        let (topic_type, entry_name, parser) = Self::prepare_topic_subscription(
+                            &topic_cfg,
+                            &topic_types,
+                            &worker_cfg.schema_paths,
+                            &pipeline_tx,
+                        )?;
+
+                        let labels_cfg = topic_cfg.labels.clone();
+                        let callback = Self::make_subscription_callback(
+                            entry_name.clone(),
+                            topic_cfg.name.clone(),
+                            labels_cfg,
+                            parser.clone(),
+                            pipeline_tx.clone(),
+                        );
+
+                        let mut options = SubscriptionOptions::new(topic_cfg.name.as_str());
+                        options.qos = QoSProfile::default().keep_last(worker_cfg.queue_size as u32);
+
+                        let subscription = node
+                            .create_serialized_subscription(
+                                MessageTypeName::try_from(topic_type.as_str())?,
+                                options,
+                                callback,
+                            )
+                            .map_err(|err| {
+                                anyhow!(
+                                    "Failed to subscribe to ROS2 topic '{}' [{}]: {}",
+                                    topic_cfg.name,
+                                    topic_type,
+                                    err
+                                )
+                            })?;
+
+                        subscriptions.push((subscription, entry_name, topic_type));
+                    }
+
+                    let _ = ready_tx.send(Ok(()));
+
+                    while !thread_stop.load(Ordering::Relaxed) {
+                        let errors =
+                            executor.spin(SpinOptions::spin_once().timeout(Duration::from_millis(200)));
+                        for err in errors {
+                            if !err.is_timeout() {
+                                warn!("ROS2 executor error in '{}': {}", worker_cfg.node_name, err);
+                            }
+                        }
+                    }
+
+                    debug!("ROS2 worker for '{}' is stopping", worker_cfg.node_name);
+                    drop(subscriptions);
+                    Ok(())
+                };
+
+                if let Err(err) = startup() {
+                    let _ = ready_tx.send(Err(err.to_string()));
+                }
+            })
+            .map_err(|err| anyhow!("Failed to spawn ROS2 worker thread: {}", err))
+    }
 }
 
 #[async_trait]
@@ -251,160 +420,8 @@ impl InputLauncher for Ros2Instance {
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
-        let worker_cfg = cfg.clone();
-        let worker_pipeline_tx = pipeline_tx.clone();
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
-
-        let worker = std::thread::Builder::new()
-            .name(format!("ros2-{}", cfg.node_name))
-            .spawn(move || {
-                let startup = || -> Result<(), Error> {
-                    let context = Self::create_context(&worker_cfg)?;
-                    let mut executor = context.create_basic_executor();
-                    let node = executor
-                        .create_node(worker_cfg.node_name.as_str())
-                        .map_err(|err| anyhow!("Failed to create ROS2 node '{}': {}", worker_cfg.node_name, err))?;
-
-                    info!(
-                        "Launching ROS2 input '{}' in domain {:?}",
-                        worker_cfg.node_name, worker_cfg.domain_id
-                    );
-
-                    let resolved_topics = wildcard::resolve_topics_for_subscription(&node, &worker_cfg.topics)?;
-                    if resolved_topics.is_empty() {
-                        warn!(
-                            "ROS2 input '{}' has no resolved topics to subscribe after wildcard expansion",
-                            worker_cfg.node_name
-                        );
-                    }
-
-                    let topic_types = wildcard::topic_types_by_name(&node)?;
-                    let mut subscriptions = Vec::new();
-
-                    for topic_cfg in resolved_topics {
-                        let topic_name = topic_cfg.name.clone();
-                        let topic_type = Self::select_topic_type(&topic_name, &topic_types)?;
-                        let schema = Self::load_schema_text(&topic_type, &worker_cfg.schema_paths)?;
-                        let needs_dynamic_labels = topic_cfg
-                            .labels
-                            .iter()
-                            .any(|rule| matches!(rule, Ros2LabelRule::Field { .. }));
-                        let parser = if needs_dynamic_labels {
-                            Some(Arc::new(Ros2DynamicParser::new(&topic_type, &schema)?))
-                        } else {
-                            None
-                        };
-                        let entry_name = topic_cfg
-                            .entry_name
-                            .clone()
-                            .unwrap_or_else(|| topic_name.clone());
-
-                        let attachment = Attachment {
-                            entry_name: entry_name.clone(),
-                            key: "$ros".to_string(),
-                            payload: serde_json::json!({
-                                "encoding": "cdr",
-                                "topic": topic_name,
-                                "schema_name": topic_type,
-                                "schema": schema,
-                            }),
-                        };
-                        if let Err(err) = worker_pipeline_tx.blocking_send(Message::Attachment(attachment)) {
-                            warn!(
-                                "Failed to forward ROS2 attachment for topic '{}' to pipeline: {}",
-                                topic_cfg.name, err
-                            );
-                        }
-
-                        let labels_cfg = topic_cfg.labels.clone();
-                        let topic_name_for_cb = topic_cfg.name.clone();
-                        let entry_name_for_cb = entry_name.clone();
-                        let pipeline_tx_for_cb = worker_pipeline_tx.clone();
-                        let parser_for_cb = parser.clone();
-
-                        let mut options = SubscriptionOptions::new(topic_cfg.name.as_str());
-                        options.qos = QoSProfile::default().keep_last(worker_cfg.queue_size as u32);
-
-                        let subscription = node
-                            .create_serialized_subscription(
-                                MessageTypeName::try_from(topic_type.as_str())?,
-                                options,
-                                move |payload: Vec<u8>, info: MessageInfo| {
-                                    let decoded = parser_for_cb.as_ref().and_then(|parser| {
-                                        match parser.decode_json(payload.as_slice()) {
-                                            Ok(decoded) => Some(decoded),
-                                            Err(err) => {
-                                                warn!(
-                                                    "Failed to decode ROS2 payload for topic '{}': {}",
-                                                    topic_name_for_cb, err
-                                                );
-                                                None
-                                            }
-                                        }
-                                    });
-
-                                    let labels = match decoded.as_ref() {
-                                        Some(message) => Self::build_labels(message, &labels_cfg),
-                                        None => Self::build_static_labels(&labels_cfg),
-                                    };
-                                    let timestamp = decoded
-                                        .as_ref()
-                                        .and_then(Self::extract_header_timestamp_us)
-                                        .unwrap_or_else(|| Self::message_info_timestamp_us(&info));
-
-                                    let record = Record {
-                                        entry_name: entry_name_for_cb.clone(),
-                                        content: Bytes::from(payload),
-                                        content_type: Some(Self::default_content_type().to_string()),
-                                        labels,
-                                    };
-
-                                    let _ = timestamp;
-                                    if let Err(err) =
-                                        pipeline_tx_for_cb.blocking_send(Message::Data(record))
-                                    {
-                                        warn!(
-                                            "Failed to forward ROS2 record for topic '{}' to pipeline: {}",
-                                            topic_name_for_cb, err
-                                        );
-                                    }
-                                },
-                            )
-                            .map_err(|err| {
-                                anyhow!(
-                                    "Failed to subscribe to ROS2 topic '{}' [{}]: {}",
-                                    topic_cfg.name,
-                                    topic_type,
-                                    err
-                                )
-                            })?;
-
-                        subscriptions.push((subscription, entry_name, topic_type));
-                    }
-
-                    let _ = ready_tx.send(Ok(()));
-
-                    while !thread_stop.load(Ordering::Relaxed) {
-                        let errors = executor.spin(
-                            SpinOptions::spin_once().timeout(Duration::from_millis(200)),
-                        );
-                        for err in errors {
-                            if !err.is_timeout() {
-                                warn!("ROS2 executor error in '{}': {}", worker_cfg.node_name, err);
-                            }
-                        }
-                    }
-
-                    debug!("ROS2 worker for '{}' is stopping", worker_cfg.node_name);
-                    drop(subscriptions);
-                    Ok(())
-                };
-
-                if let Err(err) = startup() {
-                    let _ = ready_tx.send(Err(err.to_string()));
-                }
-            })
-            .map_err(|err| anyhow!("Failed to spawn ROS2 worker thread: {}", err))?;
+        let worker = Self::spawn_worker(&cfg, pipeline_tx.clone(), thread_stop, ready_tx)?;
 
         match ready_rx.recv() {
             Ok(Ok(())) => {}

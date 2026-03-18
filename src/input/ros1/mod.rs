@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use crate::formats::json::{extract_json_path, value_to_label};
 use crate::formats::ros1::msg_to_json;
 use crate::input::InputLauncher;
 use crate::message::{Attachment, Message, Record};
@@ -83,31 +84,6 @@ impl Ros1Instance {
         Self { cfg }
     }
 
-    fn extract_json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
-        let mut current = value;
-        for segment in path.split('.') {
-            if segment.is_empty() {
-                continue;
-            }
-            if let Ok(index) = segment.parse::<usize>() {
-                current = current.get(index)?;
-            } else {
-                current = current.get(segment)?;
-            }
-        }
-        Some(current)
-    }
-
-    fn value_to_label(value: &Value) -> String {
-        match value {
-            Value::Null => "null".to_string(),
-            Value::Bool(v) => v.to_string(),
-            Value::Number(v) => v.to_string(),
-            Value::String(v) => v.clone(),
-            other => other.to_string(),
-        }
-    }
-
     fn build_static_labels(rules: &[Ros1LabelRule]) -> HashMap<String, String> {
         let mut labels = HashMap::new();
         for rule in rules {
@@ -124,8 +100,8 @@ impl Ros1Instance {
         let mut labels = Self::build_static_labels(rules);
         for rule in rules {
             if let Ros1LabelRule::Field { field, label } = rule {
-                if let Some(value) = Self::extract_json_path(message, field) {
-                    labels.insert(label.clone(), Self::value_to_label(value));
+                if let Some(value) = extract_json_path(message, field) {
+                    labels.insert(label.clone(), value_to_label(value));
                 }
             }
         }

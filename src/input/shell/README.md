@@ -38,6 +38,20 @@ labels = [
 ]
 ```
 
+## Build
+
+Shell input is included in the default build:
+
+```bash
+cargo build
+```
+
+If you want to select features explicitly:
+
+```bash
+cargo build --no-default-features --features shell
+```
+
 ## Runtime Notes
 
 - Each non-empty output line becomes one record.

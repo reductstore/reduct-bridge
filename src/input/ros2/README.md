@@ -55,6 +55,24 @@ labels = [
 ]
 ```
 
+## Build
+
+ROS2 input requires a local ROS2 installation and a sourced ROS2 environment before building:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cargo build --no-default-features --features ros2
+```
+
+The ROS2 installation must include the standard interface packages that `rclrs` links against. In CI we install `ros-jazzy-example-interfaces` and `ros-jazzy-test-msgs` explicitly.
+
+Build all inputs in one command:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cargo build --no-default-features --features all-inputs
+```
+
 ## Runtime Notes
 
 - Empty topic names are not allowed.
