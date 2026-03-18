@@ -20,6 +20,7 @@ use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{Sender, channel};
 use tokio::time::{Duration, interval};
 
@@ -132,6 +133,10 @@ impl ShellInstance {
         }
 
         Ok(Record {
+            timestamp_us: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros() as u64,
             entry_name: cfg.entry_name.clone(),
             content: line.to_string().into(),
             content_type: cfg.content_type.clone(),

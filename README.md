@@ -87,6 +87,15 @@ For ROS2 builds, the installation must include the standard interface packages r
 reduct-bridge /path/to/config.toml
 ```
 
+For ROS2 inputs, start the bridge from a sourced ROS2 environment and set `ROS_HOME` to a writable directory, especially under `systemd`:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export ROS_HOME=/var/lib/reduct-bridge/.ros
+mkdir -p "$ROS_HOME"
+reduct-bridge /path/to/config.toml
+```
+
 ## Documentation
 
 For detailed documentation, please refer to the [ReductBridge Documentation](https://reduct.store/docs/reduct-bridge).

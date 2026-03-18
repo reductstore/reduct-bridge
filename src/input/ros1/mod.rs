@@ -24,6 +24,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{Sender, channel};
 
 mod wildcard;
@@ -203,6 +204,10 @@ impl TopicRuntime {
         };
 
         let record = Record {
+            timestamp_us: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros() as u64,
             entry_name: self.entry_name.clone(),
             content: msg_bytes.into(),
             content_type: Some(Ros1Instance::default_content_type().to_string()),

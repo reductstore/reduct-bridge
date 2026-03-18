@@ -67,6 +67,7 @@ impl ReductInstance {
 
         let mut builder = RecordBuilder::new()
             .entry(entry)
+            .timestamp_us(record.timestamp_us)
             .labels(record.labels)
             .data(record.content);
 
@@ -264,6 +265,10 @@ mod tests {
     #[fixture]
     fn data_message() -> Message {
         Message::Data(Record {
+            timestamp_us: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros() as u64,
             entry_name: "entry".to_string(),
             content: Bytes::from("hello"),
             content_type: Some("text/plain".to_string()),

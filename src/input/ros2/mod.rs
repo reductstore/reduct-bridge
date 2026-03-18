@@ -13,6 +13,7 @@ use rclrs::{
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -96,6 +97,40 @@ impl Ros2Instance {
         "application/cdr"
     }
 
+    fn ensure_ros_logging_environment(node_name: &str) -> Result<(), Error> {
+        if std::env::var_os("ROS_LOG_DIR").is_some() {
+            return Ok(());
+        }
+
+        if std::env::var_os("HOME").is_some() || std::env::var_os("ROS_HOME").is_some() {
+            return Ok(());
+        }
+
+        let ros_home = std::env::temp_dir().join("reduct-bridge").join("ros");
+        let ros_log_dir = ros_home.join("log");
+        fs::create_dir_all(&ros_log_dir).map_err(|err| {
+            anyhow!(
+                "Failed to create fallback ROS2 log directory '{}' for node '{}': {}",
+                ros_log_dir.display(),
+                node_name,
+                err
+            )
+        })?;
+
+        // ROS2 expands '~' for its default log path. Systemd services often run without HOME,
+        // so provide explicit fallback directories instead of depending on shell login state.
+        unsafe {
+            std::env::set_var("ROS_HOME", &ros_home);
+            std::env::set_var("ROS_LOG_DIR", &ros_log_dir);
+        }
+        info!(
+            "ROS2 logging environment was unset; using fallback ROS_HOME='{}' ROS_LOG_DIR='{}'",
+            ros_home.display(),
+            ros_log_dir.display()
+        );
+        Ok(())
+    }
+
     fn has_dynamic_labels(rules: &[Ros2LabelRule]) -> bool {
         rules
             .iter()
@@ -103,6 +138,7 @@ impl Ros2Instance {
     }
 
     fn create_context(cfg: &Ros2Config) -> Result<Context, Error> {
+        Self::ensure_ros_logging_environment(&cfg.node_name)?;
         let init = InitOptions::new().with_domain_id(cfg.domain_id);
         Context::new(std::env::args(), init)
             .map_err(|err| anyhow!("Failed to initialize ROS2 context: {}", err))
@@ -308,13 +344,13 @@ impl Ros2Instance {
                 .unwrap_or_else(|| Self::message_info_timestamp_us(&info));
 
             let record = Record {
+                timestamp_us: timestamp,
                 entry_name: entry_name.clone(),
                 content: Bytes::from(payload),
                 content_type: Some(Self::default_content_type().to_string()),
                 labels,
             };
 
-            let _ = timestamp;
             if let Err(err) = pipeline_tx.blocking_send(Message::Data(record)) {
                 warn!(
                     "Failed to forward ROS2 record for topic '{}' to pipeline: {}",
