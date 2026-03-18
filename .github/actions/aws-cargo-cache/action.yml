@@ -4,10 +4,17 @@ inputs:
   target:
     description: 'Target triple.'
     required: true
+  os:
+    description: 'Runner operating system label.'
+    required: true
   profile:
     description: 'Cargo profile used for the build.'
     required: false
     default: 'ci'
+  variant:
+    description: 'Build variant identifier to isolate cached target artifacts.'
+    required: false
+    default: ''
   access-key-id:
     description: 'AWS Access Key ID'
     required: true
@@ -44,7 +51,7 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           target/
-        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+        key: ${{ runner.os }}-${{ inputs.os }}-${{ inputs.target }}-${{ inputs.profile }}-${{ inputs.variant }}-cargo-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
       env:
         RUNS_ON_S3_BUCKET_CACHE: reduct-cache
         RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com

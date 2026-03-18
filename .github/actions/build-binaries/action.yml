@@ -62,8 +62,10 @@ runs:
     - name: AWS Credentials and Cargo Cache
       uses: ./.github/actions/aws-cargo-cache
       with:
+        os: ${{ inputs.os }}
         target: ${{ inputs.target }}
         profile: ${{ github.event_name == 'pull_request' && 'ci' || 'release' }}
+        variant: ${{ inputs.artifact-prefix }}
         access-key-id: ${{ inputs.access-key-id }}
         secret-access-key: ${{ inputs.secret-access-key }}
 
