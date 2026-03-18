@@ -1,5 +1,11 @@
 # reduct-bridge
 
+[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reductstore/reduct-bridge)](https://github.com/reductstore/reduct-bridge/releases/latest)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reduct-bridge/ci.yml?branch=main)](https://github.com/reductstore/reduct-bridge/actions)
+[![Docker Pulls](https://img.shields.io/docker/pulls/reduct/bridge)](https://hub.docker.com/r/reduct/bridge)
+[![GitHub all releases](https://img.shields.io/github/downloads/reductstore/reduct-bridge/total)](https://github.com/reductstore/reduct-bridge/releases/latest)
+[![codecov](https://codecov.io/gh/reductstore/reduct-bridge/branch/main/graph/badge.svg)](https://codecov.io/gh/reductstore/reduct-bridge)
+
 ReductBridge bridges live robotics and IIoT data with long-term storage in ReductStore.
 You can configure the bridge using a simple TOML file to define `inputs`, `pipelines`, and `remotes`.
 Inputs produce data, pipelines route and modify it, and remotes store it.
@@ -80,10 +86,6 @@ For ROS2 builds, the installation must include the standard interface packages r
 ```bash
 reduct-bridge /path/to/config.toml
 ```
-
-See [examples/ros_config.toml](/home/atimin/Projects/reductstore/reduct-bridge/examples/ros_config.toml) for a sample configuration file.
-ROS2 inputs can use explicit `schema_paths` prefixes to resolve `<prefix>/share/<package>/msg/<Type>.msg`.
-If `schema_paths` is omitted, the bridge falls back to `AMENT_PREFIX_PATH`, `COLCON_PREFIX_PATH`, and `CMAKE_PREFIX_PATH`.
 
 ## Documentation
 
