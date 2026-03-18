@@ -405,7 +405,7 @@ jobs:
         with:
           images: ${{ matrix.image_name }}
           tags: |
-            type=raw,value=${{ matrix.image_suffix }}-${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name[1:] || github.ref_name }}
+            type=raw,value=${{ matrix.image_suffix }}-${{ github.ref_name }}
 
       - name: Build and push Docker image to GitHub repo
         id: build
