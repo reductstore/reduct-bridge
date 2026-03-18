@@ -14,3 +14,5 @@
 
 #[cfg(feature = "ros1")]
 pub mod ros1;
+#[cfg(feature = "ros2")]
+pub mod ros2;

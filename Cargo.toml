@@ -5,8 +5,9 @@ edition = "2024"
 
 
 [features]
-default = ["ros1", "shell"]
+default = ["shell", "ros1", "ros2"]
 ros1 = ["dep:rosrust"]
+ros2 = ["dep:rclrs", "dep:ros2_message"]
 shell = []
 ci = []
 
@@ -24,6 +25,8 @@ env_logger = "0.11.8"
 regex = "1.12.2"
 serde_json = "1.0.145"
 rosrust = { version = "0.9.12", optional = true }
+rclrs = { path = "../ros2_rust/rclrs", optional = true }
+ros2_message = { git = "https://github.com/reductstore/ros2_message", optional = true }
 
 
 [dev-dependencies]

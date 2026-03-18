@@ -12,6 +12,7 @@ Supported input types include:
 
 - [Shell](src/input/shell/README.md) - run shell commands on a fixed interval and store output lines as records.
 - [ROS1](src/input/ros1/README.md) - subscribe to ROS1 topics and store ROS messages as records.
+- [ROS2](src/input/ros2/README.md) - subscribe to ROS2 topics and store serialized CDR payloads as records.
 
 ## Remotes
 
@@ -62,6 +63,8 @@ reduct-bridge /path/to/config.toml
 ```
 
 See [examples/ros_config.toml](/home/atimin/Projects/reductstore/reduct-bridge/examples/ros_config.toml) for a sample configuration file.
+ROS2 inputs can use explicit `schema_paths` prefixes to resolve `<prefix>/share/<package>/msg/<Type>.msg`.
+If `schema_paths` is omitted, the bridge falls back to `AMENT_PREFIX_PATH`, `COLCON_PREFIX_PATH`, and `CMAKE_PREFIX_PATH`.
 
 ## Documentation
 
