@@ -199,7 +199,8 @@ impl Ros2Instance {
         }
 
         let mut full_schema = schema.clone();
-        for dependency in Self::schema_dependencies(&schema) {
+        let package = Self::schema_package(schema_name)?;
+        for dependency in Self::schema_dependencies(&schema, &package) {
             if visited.contains(&dependency) {
                 continue;
             }
@@ -260,7 +261,25 @@ impl Ros2Instance {
         )
     }
 
-    fn schema_dependencies(schema: &str) -> Vec<String> {
+    fn schema_package(schema_name: &str) -> Result<String, Error> {
+        let mut parts = schema_name.split('/');
+        let package = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        let kind = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        let _type_name = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        if kind != "msg" || parts.next().is_some() {
+            bail!("Unsupported ROS2 schema name '{}'", schema_name);
+        }
+
+        Ok(package.to_string())
+    }
+
+    fn schema_dependencies(schema: &str, package: &str) -> Vec<String> {
         let mut dependencies = Vec::new();
         let mut seen = HashSet::new();
 
@@ -290,22 +309,25 @@ impl Ros2Instance {
                 .next()
                 .unwrap_or(type_token);
 
-            if Self::is_builtin_ros2_type(base_type) || !base_type.contains('/') {
+            if Self::is_builtin_ros2_type(base_type) {
                 continue;
             }
 
-            let mut parts = base_type.split('/');
-            let Some(package) = parts.next() else {
-                continue;
+            let dependency = if base_type.contains('/') {
+                let mut parts = base_type.split('/');
+                let Some(package) = parts.next() else {
+                    continue;
+                };
+                let Some(type_name) = parts.next() else {
+                    continue;
+                };
+                if parts.next().is_some() {
+                    continue;
+                }
+                format!("{package}/msg/{type_name}")
+            } else {
+                format!("{package}/msg/{base_type}")
             };
-            let Some(type_name) = parts.next() else {
-                continue;
-            };
-            if parts.next().is_some() {
-                continue;
-            }
-
-            let dependency = format!("{package}/msg/{type_name}");
             if seen.insert(dependency.clone()) {
                 dependencies.push(dependency);
             }
