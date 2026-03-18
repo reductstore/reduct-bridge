@@ -164,20 +164,6 @@ impl Ros2Instance {
     }
 
     fn load_schema_text(schema_name: &str, schema_paths: &[PathBuf]) -> Result<String, Error> {
-        let mut parts = schema_name.split('/');
-        let package = parts
-            .next()
-            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
-        let kind = parts
-            .next()
-            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
-        let type_name = parts
-            .next()
-            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
-        if kind != "msg" || parts.next().is_some() {
-            bail!("Unsupported ROS2 schema name '{}'", schema_name);
-        }
-
         let resolved_paths = if schema_paths.is_empty() {
             [
                 "AMENT_PREFIX_PATH",
@@ -198,7 +184,58 @@ impl Ros2Instance {
             schema_paths.to_vec()
         };
 
-        for prefix in &resolved_paths {
+        let mut visited = HashSet::new();
+        Self::load_full_schema_text(schema_name, &resolved_paths, &mut visited)
+    }
+
+    fn load_full_schema_text(
+        schema_name: &str,
+        schema_paths: &[PathBuf],
+        visited: &mut HashSet<String>,
+    ) -> Result<String, Error> {
+        let schema = Self::read_schema_file(schema_name, schema_paths)?;
+        if !visited.insert(schema_name.to_string()) {
+            return Ok(String::new());
+        }
+
+        let mut full_schema = schema.clone();
+        for dependency in Self::schema_dependencies(&schema) {
+            if visited.contains(&dependency) {
+                continue;
+            }
+
+            let dependency_schema =
+                Self::load_full_schema_text(&dependency, schema_paths, visited)?;
+            if dependency_schema.is_empty() {
+                continue;
+            }
+
+            full_schema.push_str("================================================================================\n");
+            full_schema.push_str("MSG: ");
+            full_schema.push_str(&dependency.replace("/msg/", "/"));
+            full_schema.push('\n');
+            full_schema.push_str(&dependency_schema);
+        }
+
+        Ok(full_schema)
+    }
+
+    fn read_schema_file(schema_name: &str, schema_paths: &[PathBuf]) -> Result<String, Error> {
+        let mut parts = schema_name.split('/');
+        let package = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        let kind = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        let type_name = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        if kind != "msg" || parts.next().is_some() {
+            bail!("Unsupported ROS2 schema name '{}'", schema_name);
+        }
+
+        for prefix in schema_paths {
             let path = prefix
                 .join("share")
                 .join(package)
@@ -219,7 +256,84 @@ impl Ros2Instance {
         bail!(
             "Failed to resolve ROS2 schema '{}' from schema_paths {:?} or ROS environment variables",
             schema_name,
-            resolved_paths
+            schema_paths
+        )
+    }
+
+    fn schema_dependencies(schema: &str) -> Vec<String> {
+        let mut dependencies = Vec::new();
+        let mut seen = HashSet::new();
+
+        for line in schema.lines() {
+            let line = line.split('#').next().unwrap_or("").trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            let Some(type_token) = line.split_whitespace().next() else {
+                continue;
+            };
+            if line.contains('=')
+                && line
+                    .split_whitespace()
+                    .nth(1)
+                    .is_some_and(|token| token.contains('='))
+            {
+                continue;
+            }
+
+            let base_type = type_token
+                .split('[')
+                .next()
+                .unwrap_or(type_token)
+                .split("<=")
+                .next()
+                .unwrap_or(type_token);
+
+            if Self::is_builtin_ros2_type(base_type) || !base_type.contains('/') {
+                continue;
+            }
+
+            let mut parts = base_type.split('/');
+            let Some(package) = parts.next() else {
+                continue;
+            };
+            let Some(type_name) = parts.next() else {
+                continue;
+            };
+            if parts.next().is_some() {
+                continue;
+            }
+
+            let dependency = format!("{package}/msg/{type_name}");
+            if seen.insert(dependency.clone()) {
+                dependencies.push(dependency);
+            }
+        }
+
+        dependencies
+    }
+
+    fn is_builtin_ros2_type(type_name: &str) -> bool {
+        matches!(
+            type_name,
+            "bool"
+                | "byte"
+                | "char"
+                | "float32"
+                | "float64"
+                | "int8"
+                | "uint8"
+                | "int16"
+                | "uint16"
+                | "int32"
+                | "uint32"
+                | "int64"
+                | "uint64"
+                | "string"
+                | "wstring"
+                | "time"
+                | "duration"
         )
     }
 
