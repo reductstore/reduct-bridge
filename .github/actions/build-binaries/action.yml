@@ -22,6 +22,9 @@ inputs:
   secret-access-key:
     description: 'AWS Secret Access Key'
     required: true
+  artifact-prefix:
+    description: 'Artifact prefix, for example bridge-ros1 or bridge-ros2-jazzy.'
+    required: true
   cargo-args:
     description: 'Additional cargo arguments such as feature flags.'
     required: false
@@ -82,10 +85,9 @@ runs:
 
     - name: Upload binary (PR)
       uses: actions/upload-artifact@v4
-      # Only upload Linux binary for PRs for sanity test
-      if: github.event_name == 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
+      if: github.event_name == 'pull_request'
       with:
-        name: reduct-bridge-${{ inputs.target }}
+        name: ${{ inputs.artifact-prefix }}-${{ inputs.target }}
         path: target/${{inputs.target}}/ci/reduct-bridge
         if-no-files-found: 'error'
 
@@ -106,13 +108,13 @@ runs:
       uses: actions/upload-artifact@v4
       if: github.event_name != 'pull_request'
       with:
-        name: reduct-bridge-${{ inputs.target }}
+        name: ${{ inputs.artifact-prefix }}-${{ inputs.target }}
         path: target/${{inputs.target}}/release/reduct-bridge${{ inputs.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
         if-no-files-found: 'error'
 
 
     - name: Build and export tests (PR)
-      if: github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
       shell: bash
       run: |
         set -euo pipefail
@@ -124,7 +126,7 @@ runs:
         cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --bins ${{ inputs.cargo-args }}
 
     - name: Build and export tests (Release)
-      if: github.event_name != 'pull_request'
+      if: github.event_name != 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
       shell: bash
       run: |
         set -euo pipefail
@@ -137,6 +139,7 @@ runs:
 
     - name: Upload tests
       uses: actions/upload-artifact@v4
+      if: inputs.target == 'x86_64-unknown-linux-gnu'
       with:
-        name: reduct-bridge-tests-${{ inputs.target }}
+        name: ${{ inputs.artifact-prefix }}-tests-${{ inputs.target }}
         path: target/${{ inputs.target }}/tests

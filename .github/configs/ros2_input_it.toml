@@ -9,7 +9,6 @@ batch_max_interval_ms = 100
 [inputs.ros2.ros2_local]
 node_name = "reduct_bridge_ros2_it"
 queue_size = 128
-schema_paths = ["/opt/ros/jazzy"]
 
 [[inputs.ros2.ros2_local.topics]]
 name = "/chatter"

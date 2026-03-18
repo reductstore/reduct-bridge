@@ -7,6 +7,10 @@ inputs:
   target:
     description: 'Rust target triple.'
     required: true
+  bridge_artifact_name:
+    description: 'Artifact name containing the reduct-bridge binary.'
+    required: false
+    default: ''
   image_artifact_name:
     description: 'Artifact name for exported image tar.'
     required: false
@@ -35,7 +39,7 @@ runs:
   steps:
     - uses: actions/download-artifact@v4
       with:
-        name: reduct-bridge-${{ inputs.target }}
+        name: ${{ inputs.bridge_artifact_name != '' && inputs.bridge_artifact_name || format('reduct-bridge-{0}', inputs.target) }}
         path: /tmp/reduct-bridge/
 
     - name: Download reduct-cli from latest release

@@ -40,60 +40,85 @@ jobs:
       - rust_fmt
     strategy:
       matrix:
-        target:
-              [
-                "x86_64-unknown-linux-gnu",
-                "aarch64-unknown-linux-gnu",
-                "armv7-unknown-linux-gnueabihf",
-                "x86_64-pc-windows-gnu",
-                "x86_64-apple-darwin",
-                "aarch64-apple-darwin",
-              ]
         include:
-          - target: "x86_64-unknown-linux-gnu"
-            os: ubuntu-24.04
+          - artifact_prefix: "bridge-ros1"
+            target: "x86_64-unknown-linux-gnu"
+            os: ubuntu-22.04
             compiler: "gcc"
-            cargo_args: "--no-default-features --features all-inputs"
-            ros_setup_script: "/opt/ros/jazzy/setup.bash"
-          - target: "aarch64-unknown-linux-gnu"
+            cargo_args: "--no-default-features --features shell,ros1"
+            ros_distro: ""
+            ros_setup_script: ""
+          - artifact_prefix: "bridge-ros1"
+            target: "aarch64-unknown-linux-gnu"
             os: ubuntu-22.04
             compiler: "gcc-aarch64-linux-gnu"
-            cargo_args: ""
+            cargo_args: "--no-default-features --features shell,ros1"
+            ros_distro: ""
             ros_setup_script: ""
-          - target: "armv7-unknown-linux-gnueabihf"
+          - artifact_prefix: "bridge-ros1"
+            target: "armv7-unknown-linux-gnueabihf"
             os: ubuntu-22.04
             compiler: "gcc-arm-linux-gnueabihf"
-            cargo_args: ""
+            cargo_args: "--no-default-features --features shell,ros1"
+            ros_distro: ""
             ros_setup_script: ""
-          - target: "x86_64-pc-windows-gnu"
+          - artifact_prefix: "bridge-ros2-jazzy"
+            target: "x86_64-unknown-linux-gnu"
+            os: ubuntu-24.04
+            compiler: "gcc"
+            cargo_args: "--no-default-features --features shell,ros2"
+            ros_distro: "jazzy"
+            ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-jazzy"
+            target: "aarch64-unknown-linux-gnu"
+            os: ubuntu-24.04
+            compiler: "gcc-aarch64-linux-gnu"
+            cargo_args: "--no-default-features --features shell,ros2"
+            ros_distro: "jazzy"
+            ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-jazzy"
+            target: "armv7-unknown-linux-gnueabihf"
+            os: ubuntu-24.04
+            compiler: "gcc-arm-linux-gnueabihf"
+            cargo_args: "--no-default-features --features shell,ros2"
+            ros_distro: "jazzy"
+            ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-humble"
+            target: "x86_64-unknown-linux-gnu"
             os: ubuntu-22.04
-            compiler: "gcc-mingw-w64-x86-64"
-            cargo_args: ""
-            ros_setup_script: ""
-          - target: "x86_64-apple-darwin"
-            os: macos-14
-            compiler: ""
-            cargo_args: ""
-            ros_setup_script: ""
-          - target: "aarch64-apple-darwin"
-            os: macos-14
-            compiler: ""
-            cargo_args: ""
-            ros_setup_script: ""
+            compiler: "gcc"
+            cargo_args: "--no-default-features --features shell,ros2"
+            ros_distro: "humble"
+            ros_setup_script: "/opt/ros/humble/setup.bash"
+          - artifact_prefix: "bridge-ros2-humble"
+            target: "aarch64-unknown-linux-gnu"
+            os: ubuntu-22.04
+            compiler: "gcc-aarch64-linux-gnu"
+            cargo_args: "--no-default-features --features shell,ros2"
+            ros_distro: "humble"
+            ros_setup_script: "/opt/ros/humble/setup.bash"
+          - artifact_prefix: "bridge-ros2-humble"
+            target: "armv7-unknown-linux-gnueabihf"
+            os: ubuntu-22.04
+            compiler: "gcc-arm-linux-gnueabihf"
+            cargo_args: "--no-default-features --features shell,ros2"
+            ros_distro: "humble"
+            ros_setup_script: "/opt/ros/humble/setup.bash"
     steps:
       - uses: actions/checkout@v4
       - name: Install ROS2
         if: ${{ matrix.ros_setup_script != '' }}
         uses: ros-tooling/setup-ros@v0.7
         with:
-          required-ros-distributions: jazzy
+          required-ros-distributions: ${{ matrix.ros_distro }}
       - name: Install ROS2 interface packages
         if: ${{ matrix.ros_setup_script != '' }}
-        run: sudo apt-get update && sudo apt-get install -y ros-jazzy-example-interfaces ros-jazzy-test-msgs
+        run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
       - uses: ./.github/actions/build-binaries
         with:
           minimal_rust_version: ${{ vars.MINIMAL_RUST_VERSION }}
           action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+          artifact-prefix: ${{ matrix.artifact_prefix }}
           target: ${{ matrix.target }}
           os: ${{ matrix.os }}
           compiler: ${{ matrix.compiler }}
@@ -107,7 +132,22 @@ jobs:
     needs:
       - rust_fmt
       - build_binaries
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - artifact_prefix: "bridge-ros1"
+            os: ubuntu-22.04
+            ros_distro: ""
+            ros_setup_script: ""
+          - artifact_prefix: "bridge-ros2-jazzy"
+            os: ubuntu-24.04
+            ros_distro: "jazzy"
+            ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-humble"
+            os: ubuntu-22.04
+            ros_distro: "humble"
+            ros_setup_script: "/opt/ros/humble/setup.bash"
     timeout-minutes: 5
     env:
       RUST_BACKTRACE: 1
@@ -115,30 +155,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install ROS2
+        if: ${{ matrix.ros_setup_script != '' }}
         uses: ros-tooling/setup-ros@v0.7
         with:
-          required-ros-distributions: jazzy
+          required-ros-distributions: ${{ matrix.ros_distro }}
       - name: Install ROS2 interface packages
-        run: sudo apt-get update && sudo apt-get install -y ros-jazzy-example-interfaces ros-jazzy-test-msgs
+        if: ${{ matrix.ros_setup_script != '' }}
+        run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
+      - name: Download test artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact_prefix }}-tests-x86_64-unknown-linux-gnu
+          path: ./tmp/tests
       - uses: ./.github/actions/unit-tests
         with:
-          os: ubuntu-24.04
+          os: ${{ matrix.os }}
           target: x86_64-unknown-linux-gnu
-          ros-setup-script: /opt/ros/jazzy/setup.bash
+          ros-setup-script: ${{ matrix.ros_setup_script }}
 
   ros1_input_integration:
     name: ROS1 Input Integration
     needs:
       - rust_fmt
       - build_binaries
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Download reduct-bridge Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: reduct-bridge-x86_64-unknown-linux-gnu
+          name: bridge-ros1-x86_64-unknown-linux-gnu
           path: ./tmp/reduct-bridge
 
       - name: Install jq
@@ -153,14 +200,14 @@ jobs:
     needs:
       - rust_fmt
       - build_binaries
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Download reduct-bridge Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: reduct-bridge-x86_64-unknown-linux-gnu
+          name: bridge-ros1-x86_64-unknown-linux-gnu
           path: ./tmp/reduct-bridge
 
       - name: Install jq
@@ -175,26 +222,38 @@ jobs:
     needs:
       - rust_fmt
       - build_binaries
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - artifact_prefix: "bridge-ros2-jazzy"
+            os: ubuntu-24.04
+            ros_distro: "jazzy"
+            ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-humble"
+            os: ubuntu-22.04
+            ros_distro: "humble"
+            ros_setup_script: "/opt/ros/humble/setup.bash"
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Install ROS2
         uses: ros-tooling/setup-ros@v0.7
         with:
-          required-ros-distributions: jazzy
+          required-ros-distributions: ${{ matrix.ros_distro }}
       - name: Install ROS2 interface packages
-        run: sudo apt-get update && sudo apt-get install -y ros-jazzy-example-interfaces ros-jazzy-test-msgs
+        run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
       - name: Download reduct-bridge Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: reduct-bridge-x86_64-unknown-linux-gnu
+          name: ${{ matrix.artifact_prefix }}-x86_64-unknown-linux-gnu
           path: ./tmp/reduct-bridge
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: ./.github/actions/ros2-input-smoke
         with:
           bridge_binary: ./tmp/reduct-bridge/reduct-bridge
+          ros-setup-script: ${{ matrix.ros_setup_script }}
 
   coverage:
     name: Generate Code Coverage
@@ -203,8 +262,22 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-24.04 ]
-        target: [ x86_64-unknown-linux-gnu ]
+        include:
+          - artifact_prefix: "bridge-ros1"
+            os: ubuntu-22.04
+            cargo_args: "--no-default-features --features ci,shell,ros1"
+            ros_distro: ""
+            ros_setup_script: ""
+          - artifact_prefix: "bridge-ros2-jazzy"
+            os: ubuntu-24.04
+            cargo_args: "--no-default-features --features ci,shell,ros2"
+            ros_distro: "jazzy"
+            ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-humble"
+            os: ubuntu-22.04
+            cargo_args: "--no-default-features --features ci,shell,ros2"
+            ros_distro: "humble"
+            ros_setup_script: "/opt/ros/humble/setup.bash"
     timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: always
@@ -212,19 +285,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install ROS2
+        if: ${{ matrix.ros_setup_script != '' }}
         uses: ros-tooling/setup-ros@v0.7
         with:
-          required-ros-distributions: jazzy
+          required-ros-distributions: ${{ matrix.ros_distro }}
       - name: Install ROS2 interface packages
-        run: sudo apt-get update && sudo apt-get install -y ros-jazzy-example-interfaces ros-jazzy-test-msgs
+        if: ${{ matrix.ros_setup_script != '' }}
+        run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
 
       - uses: ./.github/actions/coverage
         with:
           os: ${{ matrix.os }}
-          target: ${{ matrix.target }}
+          target: x86_64-unknown-linux-gnu
           action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
-          cargo-args: --no-default-features --features ci,all-inputs
-          ros-setup-script: /opt/ros/jazzy/setup.bash
+          cargo-args: ${{ matrix.cargo_args }}
+          ros-setup-script: ${{ matrix.ros_setup_script }}
 
       - name: Upload coverage to Codecov
         continue-on-error: true
@@ -248,6 +323,7 @@ jobs:
         with:
           platform: linux/amd64
           target: x86_64-unknown-linux-gnu
+          bridge_artifact_name: bridge-ros1-x86_64-unknown-linux-gnu
           image_artifact_name: image-linux-amd64
           image_tag: ${{ github.repository }}
 
@@ -309,55 +385,46 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     strategy:
       matrix:
-        target: [
-          "x86_64-unknown-linux-gnu",
-          "aarch64-unknown-linux-gnu",
-          "x86_64-pc-windows-gnu",
-          "x86_64-apple-darwin",
-          "aarch64-apple-darwin",
-          "armv7-unknown-linux-gnueabihf"
-        ]
+        include:
+          - artifact_name: bridge-ros1-x86_64-unknown-linux-gnu
+            asset_name: bridge-ros1.x86_64-unknown-linux-gnu.tar.gz
+          - artifact_name: bridge-ros1-aarch64-unknown-linux-gnu
+            asset_name: bridge-ros1.aarch64-unknown-linux-gnu.tar.gz
+          - artifact_name: bridge-ros1-armv7-unknown-linux-gnueabihf
+            asset_name: bridge-ros1.armv7-unknown-linux-gnueabihf.tar.gz
+          - artifact_name: bridge-ros2-jazzy-x86_64-unknown-linux-gnu
+            asset_name: bridge-ros2-jazzy.x86_64-unknown-linux-gnu.tar.gz
+          - artifact_name: bridge-ros2-jazzy-aarch64-unknown-linux-gnu
+            asset_name: bridge-ros2-jazzy.aarch64-unknown-linux-gnu.tar.gz
+          - artifact_name: bridge-ros2-jazzy-armv7-unknown-linux-gnueabihf
+            asset_name: bridge-ros2-jazzy.armv7-unknown-linux-gnueabihf.tar.gz
+          - artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
+            asset_name: bridge-ros2-humble.x86_64-unknown-linux-gnu.tar.gz
+          - artifact_name: bridge-ros2-humble-aarch64-unknown-linux-gnu
+            asset_name: bridge-ros2-humble.aarch64-unknown-linux-gnu.tar.gz
+          - artifact_name: bridge-ros2-humble-armv7-unknown-linux-gnueabihf
+            asset_name: bridge-ros2-humble.armv7-unknown-linux-gnueabihf.tar.gz
     steps:
       - uses: actions/checkout@v4
-      - name: Download ${{ matrix.target }} artifact
+      - name: Download ${{ matrix.artifact_name }} artifact
         uses: actions/download-artifact@v4
         with:
-          name: reduct-bridge-${{ matrix.target }}
+          name: ${{ matrix.artifact_name }}
           path: /tmp/
-      - name: Archive binary for UNIX
-        if: ${{ matrix.target != 'x86_64-pc-windows-gnu' }}
+      - name: Archive binary
         run: |
           cd /tmp
-          tar -czvf reduct-bridge.${{ matrix.target }}.tar.gz reduct-bridge
+          tar -czvf ${{ matrix.asset_name }} reduct-bridge
 
-      - name: Archive binary for Windows
-        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
-        run: |
-          cd /tmp
-          zip -o reduct-bridge.${{ matrix.target }}.zip reduct-bridge.exe
-
-
-      - name: Upload Linux Unix artifact
-        if: ${{ matrix.target != 'x86_64-pc-windows-gnu' }}
+      - name: Upload artifact
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ needs.make_release.outputs.upload_url }}
-          asset_path: /tmp/reduct-bridge.${{ matrix.target }}.tar.gz
-          asset_name: reduct-bridge.${{ matrix.target }}.tar.gz
+          asset_path: /tmp/${{ matrix.asset_name }}
+          asset_name: ${{ matrix.asset_name }}
           asset_content_type: application/gzip
-
-      - name: Upload Windows artifact
-        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          upload_url: ${{ needs.make_release.outputs.upload_url }}
-          asset_path: /tmp/reduct-bridge.${{ matrix.target }}.zip
-          asset_name: reduct-bridge.${{ matrix.target }}.zip
-          asset_content_type: application/zip
 
   push_image_dockerhub:
     runs-on: ubuntu-latest
@@ -373,14 +440,17 @@ jobs:
             cargo_target: x86_64-unknown-linux-gnu
             gcc_compiler: gcc-11
             digest: linux-amd64
+            bridge_artifact_name: bridge-ros1-x86_64-unknown-linux-gnu
           - platform: linux/arm64
             cargo_target: aarch64-unknown-linux-gnu
             gcc_compiler: gcc-aarch64-linux-gnu
             digest: linux-arm64
+            bridge_artifact_name: bridge-ros1-aarch64-unknown-linux-gnu
           - platform: linux/arm/v7
             cargo_target: armv7-unknown-linux-gnueabihf
             gcc_compiler: gcc-arm-linux-gnueabihf
             digest: linux-armv7
+            bridge_artifact_name: bridge-ros1-armv7-unknown-linux-gnueabihf
 
     steps:
       - uses: actions/checkout@v4
@@ -403,6 +473,7 @@ jobs:
         with:
           platform: ${{ matrix.platform }}
           target: ${{ matrix.cargo_target }}
+          bridge_artifact_name: ${{ matrix.bridge_artifact_name }}
           image_tag: ${{ env.REGISTRY_IMAGE }}
           docker_labels: ${{ steps.meta.outputs.labels }}
           upload_artifact: 'false'

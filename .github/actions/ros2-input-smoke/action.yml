@@ -4,6 +4,10 @@ inputs:
   bridge_binary:
     description: "Path to reduct-bridge binary"
     required: true
+  ros-setup-script:
+    description: "ROS2 setup script to source"
+    required: false
+    default: "/opt/ros/jazzy/setup.bash"
 runs:
   using: "composite"
   steps:
@@ -19,7 +23,7 @@ runs:
         set -euo pipefail
 
         set +u
-        source /opt/ros/jazzy/setup.bash
+        source "${{ inputs.ros-setup-script }}"
         set -u
 
         BRIDGE_BIN="${{ inputs.bridge_binary }}"
