@@ -19,6 +19,7 @@ runs:
         set -euo pipefail
 
         export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+        export AMENT_PYTHON_EXECUTABLE="${AMENT_PYTHON_EXECUTABLE:-python3}"
         source /opt/ros/jazzy/setup.bash
 
         BRIDGE_BIN="${{ inputs.bridge_binary }}"

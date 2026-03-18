@@ -182,6 +182,8 @@ jobs:
       - name: Build ROS2 bridge binary
         shell: bash
         run: |
+          export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          export AMENT_PYTHON_EXECUTABLE="${AMENT_PYTHON_EXECUTABLE:-python3}"
           source /opt/ros/jazzy/setup.bash
           cargo build --profile ci --no-default-features --features ros2
       - name: Install jq

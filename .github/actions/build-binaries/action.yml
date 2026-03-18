@@ -75,6 +75,7 @@ runs:
         set -euo pipefail
         if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
           export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          export AMENT_PYTHON_EXECUTABLE="${AMENT_PYTHON_EXECUTABLE:-python3}"
           source "${{ inputs.ros-setup-script }}"
         fi
         cargo build --profile ci -p reduct-bridge --target ${{ inputs.target }} ${{ inputs.cargo-args }}
@@ -95,6 +96,7 @@ runs:
         set -euo pipefail
         if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
           export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          export AMENT_PYTHON_EXECUTABLE="${AMENT_PYTHON_EXECUTABLE:-python3}"
           source "${{ inputs.ros-setup-script }}"
         fi
         cargo build --locked --profile release -p reduct-bridge --target ${{ inputs.target }} ${{ inputs.cargo-args }}
@@ -116,6 +118,7 @@ runs:
         set -euo pipefail
         if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
           export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          export AMENT_PYTHON_EXECUTABLE="${AMENT_PYTHON_EXECUTABLE:-python3}"
           source "${{ inputs.ros-setup-script }}"
         fi
         cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --bins ${{ inputs.cargo-args }}
@@ -127,6 +130,7 @@ runs:
         set -euo pipefail
         if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
           export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          export AMENT_PYTHON_EXECUTABLE="${AMENT_PYTHON_EXECUTABLE:-python3}"
           source "${{ inputs.ros-setup-script }}"
         fi
         cargo export target/${{ inputs.target }}/tests -- test --profile release --target ${{ inputs.target }} --bins ${{ inputs.cargo-args }}
