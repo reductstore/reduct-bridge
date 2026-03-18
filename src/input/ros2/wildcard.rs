@@ -55,6 +55,17 @@ pub(super) fn resolve_topic_patterns(
     for topic_cfg in configured_topics {
         let pattern = topic_cfg.name.as_str();
         if pattern.contains('*') {
+            continue;
+        }
+
+        if subscribed_topics.insert(pattern.to_string()) {
+            resolved.push(topic_cfg.clone());
+        }
+    }
+
+    for topic_cfg in configured_topics {
+        let pattern = topic_cfg.name.as_str();
+        if pattern.contains('*') {
             for topic_name in available_topics {
                 if wildcard_match(pattern, topic_name)
                     && subscribed_topics.insert(topic_name.clone())
@@ -64,8 +75,6 @@ pub(super) fn resolve_topic_patterns(
                     resolved.push(expanded);
                 }
             }
-        } else if subscribed_topics.insert(pattern.to_string()) {
-            resolved.push(topic_cfg.clone());
         }
     }
 
@@ -76,16 +85,7 @@ pub(super) fn resolve_topics_for_subscription(
     node: &Node,
     configured_topics: &[Ros2TopicConfig],
 ) -> Result<Vec<Ros2TopicConfig>, Error> {
-    let available_topics = node
-        .get_topic_names_and_types()
-        .map_err(|err| {
-            anyhow!(
-                "Failed to fetch ROS2 topics for wildcard resolution: {}",
-                err
-            )
-        })?
-        .into_keys()
-        .collect::<Vec<_>>();
+    let available_topics = available_topic_names(node)?;
 
     for topic_cfg in configured_topics {
         if topic_cfg.name.contains('*') {
@@ -108,6 +108,19 @@ pub(super) fn resolve_topics_for_subscription(
     }
 
     Ok(resolve_topic_patterns(configured_topics, &available_topics))
+}
+
+pub(super) fn available_topic_names(node: &Node) -> Result<Vec<String>, Error> {
+    Ok(node
+        .get_topic_names_and_types()
+        .map_err(|err| {
+            anyhow!(
+                "Failed to fetch ROS2 topics for wildcard resolution: {}",
+                err
+            )
+        })?
+        .into_keys()
+        .collect::<Vec<_>>())
 }
 
 pub(super) fn topic_types_by_name(node: &Node) -> Result<HashMap<String, Vec<String>>, Error> {
@@ -155,7 +168,24 @@ mod tests {
 
         assert_eq!(
             names,
-            vec!["/camera/front", "/camera/rear", "/lidar/points"]
+            vec!["/lidar/points", "/camera/front", "/camera/rear"]
         );
+    }
+
+    #[test]
+    fn resolve_topic_patterns_prefers_exact_config_over_wildcard() {
+        let configured = vec![
+            topic("/camera/*", "camera"),
+            topic("/camera/front", "front"),
+        ];
+        let available = vec!["/camera/front".to_string(), "/camera/rear".to_string()];
+
+        let resolved = resolve_topic_patterns(&configured, &available);
+
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0].name, "/camera/front");
+        assert_eq!(resolved[0].entry_name, Some("front".to_string()));
+        assert_eq!(resolved[1].name, "/camera/rear");
+        assert_eq!(resolved[1].entry_name, Some("camera".to_string()));
     }
 }

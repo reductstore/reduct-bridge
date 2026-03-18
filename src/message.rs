@@ -17,6 +17,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Record {
+    pub timestamp_us: u64,
     pub entry_name: String,
     pub content: Bytes,
     pub content_type: Option<String>,

@@ -51,7 +51,7 @@ labels = [
 # ROS domain ID (optional).
 domain_id = 0
 # ROS node name for reduct-bridge (required).
-node_name = "reduct-bridge-ros2"
+node_name = "reduct_bridge_ros2"
 # Subscriber queue size (optional, default: 128, must be > 0).
 queue_size = 128
 # Optional list of ROS installation / workspace prefixes where message schemas are stored.

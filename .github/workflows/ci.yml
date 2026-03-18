@@ -305,6 +305,10 @@ jobs:
       contents: write
     needs:
       - check_tag # Only publish on tags
+      - unit_tests
+      - ros1_input_integration
+      - ros2_input_integration
+      - shell_input_integration
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     name: Make release

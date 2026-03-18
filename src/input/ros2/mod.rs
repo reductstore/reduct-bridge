@@ -12,7 +12,8 @@ use rclrs::{
 };
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -96,6 +97,40 @@ impl Ros2Instance {
         "application/cdr"
     }
 
+    fn ensure_ros_logging_environment(node_name: &str) -> Result<(), Error> {
+        if std::env::var_os("ROS_LOG_DIR").is_some() {
+            return Ok(());
+        }
+
+        if std::env::var_os("HOME").is_some() || std::env::var_os("ROS_HOME").is_some() {
+            return Ok(());
+        }
+
+        let ros_home = std::env::temp_dir().join("reduct-bridge").join("ros");
+        let ros_log_dir = ros_home.join("log");
+        fs::create_dir_all(&ros_log_dir).map_err(|err| {
+            anyhow!(
+                "Failed to create fallback ROS2 log directory '{}' for node '{}': {}",
+                ros_log_dir.display(),
+                node_name,
+                err
+            )
+        })?;
+
+        // ROS2 expands '~' for its default log path. Systemd services often run without HOME,
+        // so provide explicit fallback directories instead of depending on shell login state.
+        unsafe {
+            std::env::set_var("ROS_HOME", &ros_home);
+            std::env::set_var("ROS_LOG_DIR", &ros_log_dir);
+        }
+        info!(
+            "ROS2 logging environment was unset; using fallback ROS_HOME='{}' ROS_LOG_DIR='{}'",
+            ros_home.display(),
+            ros_log_dir.display()
+        );
+        Ok(())
+    }
+
     fn has_dynamic_labels(rules: &[Ros2LabelRule]) -> bool {
         rules
             .iter()
@@ -103,6 +138,7 @@ impl Ros2Instance {
     }
 
     fn create_context(cfg: &Ros2Config) -> Result<Context, Error> {
+        Self::ensure_ros_logging_environment(&cfg.node_name)?;
         let init = InitOptions::new().with_domain_id(cfg.domain_id);
         Context::new(std::env::args(), init)
             .map_err(|err| anyhow!("Failed to initialize ROS2 context: {}", err))
@@ -128,20 +164,6 @@ impl Ros2Instance {
     }
 
     fn load_schema_text(schema_name: &str, schema_paths: &[PathBuf]) -> Result<String, Error> {
-        let mut parts = schema_name.split('/');
-        let package = parts
-            .next()
-            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
-        let kind = parts
-            .next()
-            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
-        let type_name = parts
-            .next()
-            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
-        if kind != "msg" || parts.next().is_some() {
-            bail!("Unsupported ROS2 schema name '{}'", schema_name);
-        }
-
         let resolved_paths = if schema_paths.is_empty() {
             [
                 "AMENT_PREFIX_PATH",
@@ -162,7 +184,59 @@ impl Ros2Instance {
             schema_paths.to_vec()
         };
 
-        for prefix in &resolved_paths {
+        let mut visited = HashSet::new();
+        Self::load_full_schema_text(schema_name, &resolved_paths, &mut visited)
+    }
+
+    fn load_full_schema_text(
+        schema_name: &str,
+        schema_paths: &[PathBuf],
+        visited: &mut HashSet<String>,
+    ) -> Result<String, Error> {
+        let schema = Self::read_schema_file(schema_name, schema_paths)?;
+        if !visited.insert(schema_name.to_string()) {
+            return Ok(String::new());
+        }
+
+        let mut full_schema = schema.clone();
+        let package = Self::schema_package(schema_name)?;
+        for dependency in Self::schema_dependencies(&schema, &package) {
+            if visited.contains(&dependency) {
+                continue;
+            }
+
+            let dependency_schema =
+                Self::load_full_schema_text(&dependency, schema_paths, visited)?;
+            if dependency_schema.is_empty() {
+                continue;
+            }
+
+            full_schema.push_str("================================================================================\n");
+            full_schema.push_str("MSG: ");
+            full_schema.push_str(&dependency.replace("/msg/", "/"));
+            full_schema.push('\n');
+            full_schema.push_str(&dependency_schema);
+        }
+
+        Ok(full_schema)
+    }
+
+    fn read_schema_file(schema_name: &str, schema_paths: &[PathBuf]) -> Result<String, Error> {
+        let mut parts = schema_name.split('/');
+        let package = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        let kind = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        let type_name = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        if kind != "msg" || parts.next().is_some() {
+            bail!("Unsupported ROS2 schema name '{}'", schema_name);
+        }
+
+        for prefix in schema_paths {
             let path = prefix
                 .join("share")
                 .join(package)
@@ -183,7 +257,105 @@ impl Ros2Instance {
         bail!(
             "Failed to resolve ROS2 schema '{}' from schema_paths {:?} or ROS environment variables",
             schema_name,
-            resolved_paths
+            schema_paths
+        )
+    }
+
+    fn schema_package(schema_name: &str) -> Result<String, Error> {
+        let mut parts = schema_name.split('/');
+        let package = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        let kind = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        let _type_name = parts
+            .next()
+            .ok_or_else(|| anyhow!("Invalid ROS2 schema name '{}'", schema_name))?;
+        if kind != "msg" || parts.next().is_some() {
+            bail!("Unsupported ROS2 schema name '{}'", schema_name);
+        }
+
+        Ok(package.to_string())
+    }
+
+    fn schema_dependencies(schema: &str, package: &str) -> Vec<String> {
+        let mut dependencies = Vec::new();
+        let mut seen = HashSet::new();
+
+        for line in schema.lines() {
+            let line = line.split('#').next().unwrap_or("").trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            let Some(type_token) = line.split_whitespace().next() else {
+                continue;
+            };
+            if line.contains('=')
+                && line
+                    .split_whitespace()
+                    .nth(1)
+                    .is_some_and(|token| token.contains('='))
+            {
+                continue;
+            }
+
+            let base_type = type_token
+                .split('[')
+                .next()
+                .unwrap_or(type_token)
+                .split("<=")
+                .next()
+                .unwrap_or(type_token);
+
+            if Self::is_builtin_ros2_type(base_type) {
+                continue;
+            }
+
+            let dependency = if base_type.contains('/') {
+                let mut parts = base_type.split('/');
+                let Some(package) = parts.next() else {
+                    continue;
+                };
+                let Some(type_name) = parts.next() else {
+                    continue;
+                };
+                if parts.next().is_some() {
+                    continue;
+                }
+                format!("{package}/msg/{type_name}")
+            } else {
+                format!("{package}/msg/{base_type}")
+            };
+            if seen.insert(dependency.clone()) {
+                dependencies.push(dependency);
+            }
+        }
+
+        dependencies
+    }
+
+    fn is_builtin_ros2_type(type_name: &str) -> bool {
+        matches!(
+            type_name,
+            "bool"
+                | "byte"
+                | "char"
+                | "float32"
+                | "float64"
+                | "int8"
+                | "uint8"
+                | "int16"
+                | "uint16"
+                | "int32"
+                | "uint32"
+                | "int64"
+                | "uint64"
+                | "string"
+                | "wstring"
+                | "time"
+                | "duration"
         )
     }
 
@@ -276,6 +448,77 @@ impl Ros2Instance {
         )))
     }
 
+    fn wait_for_resolved_topics(
+        node: &rclrs::Node,
+        configured_topics: &[Ros2TopicConfig],
+    ) -> Result<Vec<Ros2TopicConfig>, Error> {
+        let wildcard_patterns = configured_topics
+            .iter()
+            .filter(|topic| topic.name.contains('*'))
+            .map(|topic| topic.name.as_str())
+            .collect::<Vec<_>>();
+        if wildcard_patterns.is_empty() {
+            return wildcard::resolve_topics_for_subscription(node, configured_topics);
+        }
+
+        let started = Instant::now();
+        let mut last_available_topics = Vec::new();
+
+        loop {
+            let available_topics = wildcard::available_topic_names(node)?;
+            let resolved_topics =
+                wildcard::resolve_topic_patterns(configured_topics, &available_topics);
+            let unresolved_patterns = wildcard_patterns
+                .iter()
+                .copied()
+                .filter(|pattern| {
+                    !available_topics
+                        .iter()
+                        .any(|topic| wildcard::wildcard_match(pattern, topic))
+                })
+                .collect::<HashSet<_>>();
+
+            last_available_topics = available_topics.clone();
+
+            if unresolved_patterns.is_empty() {
+                for pattern in &wildcard_patterns {
+                    let matches = available_topics
+                        .iter()
+                        .filter(|topic| wildcard::wildcard_match(pattern, topic))
+                        .count();
+                    info!(
+                        "Resolved ROS2 wildcard '{}' to {} topic(s)",
+                        pattern, matches
+                    );
+                }
+                return Ok(resolved_topics);
+            }
+
+            if started.elapsed() >= TOPIC_DISCOVERY_TIMEOUT {
+                for pattern in &wildcard_patterns {
+                    let matches = available_topics
+                        .iter()
+                        .filter(|topic| wildcard::wildcard_match(pattern, topic))
+                        .count();
+                    if matches == 0 {
+                        warn!(
+                            "No ROS2 topics matched wildcard pattern '{}' within {:?}; discovered topics: {:?}",
+                            pattern, TOPIC_DISCOVERY_TIMEOUT, last_available_topics
+                        );
+                    } else {
+                        info!(
+                            "Resolved ROS2 wildcard '{}' to {} topic(s)",
+                            pattern, matches
+                        );
+                    }
+                }
+                return Ok(resolved_topics);
+            }
+
+            std::thread::sleep(TOPIC_DISCOVERY_RETRY_INTERVAL);
+        }
+    }
+
     fn make_subscription_callback(
         entry_name: String,
         topic_name: String,
@@ -308,13 +551,13 @@ impl Ros2Instance {
                 .unwrap_or_else(|| Self::message_info_timestamp_us(&info));
 
             let record = Record {
+                timestamp_us: timestamp,
                 entry_name: entry_name.clone(),
                 content: Bytes::from(payload),
                 content_type: Some(Self::default_content_type().to_string()),
                 labels,
             };
 
-            let _ = timestamp;
             if let Err(err) = pipeline_tx.blocking_send(Message::Data(record)) {
                 warn!(
                     "Failed to forward ROS2 record for topic '{}' to pipeline: {}",
@@ -350,8 +593,7 @@ impl Ros2Instance {
                         worker_cfg.node_name, worker_cfg.domain_id
                     );
 
-                    let resolved_topics =
-                        wildcard::resolve_topics_for_subscription(&node, &worker_cfg.topics)?;
+                    let resolved_topics = Self::wait_for_resolved_topics(&node, &worker_cfg.topics)?;
                     if resolved_topics.is_empty() {
                         warn!(
                             "ROS2 input '{}' has no resolved topics to subscribe after wildcard expansion",

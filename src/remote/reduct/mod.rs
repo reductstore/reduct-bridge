@@ -60,13 +60,32 @@ impl ReductInstance {
         Self { cfg }
     }
 
-    fn to_reduct_record(cfg: &RemoteConfig, record: Record) -> reduct_rs::Record {
-        let mut entry = String::with_capacity(cfg.prefix.len() + record.entry_name.len());
-        entry.push_str(&cfg.prefix);
-        entry.push_str(&record.entry_name);
+    fn normalize_entry_path(prefix: &str, entry_name: &str) -> Option<String> {
+        let entry = prefix
+            .split('/')
+            .chain(entry_name.split('/'))
+            .filter(|segment| !segment.is_empty())
+            .collect::<Vec<_>>()
+            .join("/");
+
+        if entry.is_empty() { None } else { Some(entry) }
+    }
+
+    fn to_reduct_record(cfg: &RemoteConfig, record: Record) -> Option<reduct_rs::Record> {
+        let entry = match Self::normalize_entry_path(&cfg.prefix, &record.entry_name) {
+            Some(entry) => entry,
+            None => {
+                warn!(
+                    "Skipping record with invalid entry path prefix='{}' entry_name='{}'",
+                    cfg.prefix, record.entry_name
+                );
+                return None;
+            }
+        };
 
         let mut builder = RecordBuilder::new()
             .entry(entry)
+            .timestamp_us(record.timestamp_us)
             .labels(record.labels)
             .data(record.content);
 
@@ -74,7 +93,7 @@ impl ReductInstance {
             builder = builder.content_type(content_type);
         }
 
-        builder.build()
+        Some(builder.build())
     }
 
     async fn flush_batch(bucket: &Bucket, batch: &mut WriteRecordBatchBuilder) {
@@ -109,9 +128,13 @@ impl ReductInstance {
     }
 
     async fn write_attachment(cfg: &RemoteConfig, bucket: &Bucket, attachment: Attachment) {
-        let mut entry = String::with_capacity(cfg.prefix.len() + attachment.entry_name.len());
-        entry.push_str(&cfg.prefix);
-        entry.push_str(&attachment.entry_name);
+        let Some(entry) = Self::normalize_entry_path(&cfg.prefix, &attachment.entry_name) else {
+            warn!(
+                "Skipping attachment with invalid entry path prefix='{}' entry_name='{}'",
+                cfg.prefix, attachment.entry_name
+            );
+            return;
+        };
 
         let mut attachments = std::collections::HashMap::new();
         attachments.insert(attachment.key, attachment.payload);
@@ -167,11 +190,13 @@ impl RemoteInstanceLauncher for ReductInstance {
                     maybe_message = rx.recv() => {
                         match maybe_message {
                             Some(Message::Data(record)) => {
-                                batch.append_record(Self::to_reduct_record(&cfg, record));
-                                if batch.record_count() > cfg.batch_max_records
-                                    || batch.size() > cfg.batch_max_size_bytes
-                                {
-                                    Self::flush_batch(&bucket, &mut batch).await;
+                                if let Some(record) = Self::to_reduct_record(&cfg, record) {
+                                    batch.append_record(record);
+                                    if batch.record_count() > cfg.batch_max_records
+                                        || batch.size() > cfg.batch_max_size_bytes
+                                    {
+                                        Self::flush_batch(&bucket, &mut batch).await;
+                                    }
                                 }
                             }
                             Some(Message::Attachment(attachment)) => {
@@ -264,6 +289,10 @@ mod tests {
     #[fixture]
     fn data_message() -> Message {
         Message::Data(Record {
+            timestamp_us: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros() as u64,
             entry_name: "entry".to_string(),
             content: Bytes::from("hello"),
             content_type: Some("text/plain".to_string()),
@@ -283,6 +312,19 @@ mod tests {
                 "schema_name": "geometry_msgs/Point",
             }),
         })
+    }
+
+    #[test]
+    fn normalize_entry_path_collapses_extra_slashes() {
+        assert_eq!(
+            ReductInstance::normalize_entry_path("ros_data/", "/tf"),
+            Some("ros_data/tf".to_string())
+        );
+        assert_eq!(
+            ReductInstance::normalize_entry_path("/root//", "//a//b/"),
+            Some("root/a/b".to_string())
+        );
+        assert_eq!(ReductInstance::normalize_entry_path("/", "//"), None);
     }
 
     #[rstest]

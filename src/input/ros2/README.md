@@ -13,7 +13,7 @@ Use this input to read ROS2 topics and write serialized CDR payloads to ReductSt
 domain_id = 0
 
 # Required: ROS node name.
-node_name = "reduct-bridge-ros2"
+node_name = "reduct_bridge_ros2"
 
 # Optional: subscriber queue size, default = 128.
 # Must be > 0.
@@ -79,6 +79,16 @@ cargo build --no-default-features --features all-inputs
 - `entry_name` cannot be empty when explicitly set.
 - `schema_paths` is optional. If set, those paths are used first.
 - If `schema_paths` is empty, schema lookup falls back to `AMENT_PREFIX_PATH`, `COLCON_PREFIX_PATH`, and `CMAKE_PREFIX_PATH`.
+- For service deployments, set `ROS_HOME` to a writable directory before starting `reduct-bridge`.
+- If you do not set `ROS_HOME`, you must set `HOME` or `ROS_LOG_DIR` instead so ROS2 can initialize its logging directory.
+- Example:
+
+```bash
+export ROS_HOME=/var/lib/reduct-bridge/.ros
+mkdir -p "$ROS_HOME"
+reduct-bridge /etc/reduct-bridge/reduct-bridge.toml
+```
+
 - Raw record content is stored as serialized CDR with content type `application/cdr`.
 - Message schema metadata is stored automatically in the `$ros` attachment.
 - Dynamic field labels are decoded with `ros2_message` using the resolved `.msg` schema text.
