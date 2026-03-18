@@ -159,7 +159,7 @@ mod tests {
 
         assert_eq!(
             names,
-            vec!["/camera/front", "/camera/rear", "/lidar/points"]
+            vec!["/lidar/points", "/camera/front", "/camera/rear"]
         );
     }
 
