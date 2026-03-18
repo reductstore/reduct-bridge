@@ -41,6 +41,18 @@ runs:
         timeout 15s ros2 topic pub /chatter std_msgs/msg/String "{data: warmup}" >"$ROS2_WARMUP_LOG" 2>&1 &
         WARMUP_PID=$!
 
+        echo "=== [ros2-it] Waiting for /chatter type to appear in ROS graph ==="
+        for _ in $(seq 1 30); do
+          if ros2 topic list -t 2>/dev/null | grep -Fq "/chatter [std_msgs/msg/String]"; then
+            break
+          fi
+          sleep 1
+        done
+        if ! ros2 topic list -t 2>/dev/null | grep -Fq "/chatter [std_msgs/msg/String]"; then
+          echo "ROS2 topic /chatter with type std_msgs/msg/String did not appear in time"
+          exit 1
+        fi
+
         echo "=== [ros2-it] Starting reduct-bridge in debug mode ==="
         chmod +x "$BRIDGE_BIN"
         RUST_LOG=debug "$BRIDGE_BIN" "$BRIDGE_CFG" >"$BRIDGE_LOG" 2>&1 &
