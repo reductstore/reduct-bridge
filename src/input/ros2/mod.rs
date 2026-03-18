@@ -12,7 +12,7 @@ use rclrs::{
 };
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -312,6 +312,77 @@ impl Ros2Instance {
         )))
     }
 
+    fn wait_for_resolved_topics(
+        node: &rclrs::Node,
+        configured_topics: &[Ros2TopicConfig],
+    ) -> Result<Vec<Ros2TopicConfig>, Error> {
+        let wildcard_patterns = configured_topics
+            .iter()
+            .filter(|topic| topic.name.contains('*'))
+            .map(|topic| topic.name.as_str())
+            .collect::<Vec<_>>();
+        if wildcard_patterns.is_empty() {
+            return wildcard::resolve_topics_for_subscription(node, configured_topics);
+        }
+
+        let started = Instant::now();
+        let mut last_available_topics = Vec::new();
+
+        loop {
+            let available_topics = wildcard::available_topic_names(node)?;
+            let resolved_topics =
+                wildcard::resolve_topic_patterns(configured_topics, &available_topics);
+            let unresolved_patterns = wildcard_patterns
+                .iter()
+                .copied()
+                .filter(|pattern| {
+                    !available_topics
+                        .iter()
+                        .any(|topic| wildcard::wildcard_match(pattern, topic))
+                })
+                .collect::<HashSet<_>>();
+
+            last_available_topics = available_topics.clone();
+
+            if unresolved_patterns.is_empty() {
+                for pattern in &wildcard_patterns {
+                    let matches = available_topics
+                        .iter()
+                        .filter(|topic| wildcard::wildcard_match(pattern, topic))
+                        .count();
+                    info!(
+                        "Resolved ROS2 wildcard '{}' to {} topic(s)",
+                        pattern, matches
+                    );
+                }
+                return Ok(resolved_topics);
+            }
+
+            if started.elapsed() >= TOPIC_DISCOVERY_TIMEOUT {
+                for pattern in &wildcard_patterns {
+                    let matches = available_topics
+                        .iter()
+                        .filter(|topic| wildcard::wildcard_match(pattern, topic))
+                        .count();
+                    if matches == 0 {
+                        warn!(
+                            "No ROS2 topics matched wildcard pattern '{}' within {:?}; discovered topics: {:?}",
+                            pattern, TOPIC_DISCOVERY_TIMEOUT, last_available_topics
+                        );
+                    } else {
+                        info!(
+                            "Resolved ROS2 wildcard '{}' to {} topic(s)",
+                            pattern, matches
+                        );
+                    }
+                }
+                return Ok(resolved_topics);
+            }
+
+            std::thread::sleep(TOPIC_DISCOVERY_RETRY_INTERVAL);
+        }
+    }
+
     fn make_subscription_callback(
         entry_name: String,
         topic_name: String,
@@ -386,8 +457,7 @@ impl Ros2Instance {
                         worker_cfg.node_name, worker_cfg.domain_id
                     );
 
-                    let resolved_topics =
-                        wildcard::resolve_topics_for_subscription(&node, &worker_cfg.topics)?;
+                    let resolved_topics = Self::wait_for_resolved_topics(&node, &worker_cfg.topics)?;
                     if resolved_topics.is_empty() {
                         warn!(
                             "ROS2 input '{}' has no resolved topics to subscribe after wildcard expansion",

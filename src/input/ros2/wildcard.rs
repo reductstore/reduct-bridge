@@ -76,16 +76,7 @@ pub(super) fn resolve_topics_for_subscription(
     node: &Node,
     configured_topics: &[Ros2TopicConfig],
 ) -> Result<Vec<Ros2TopicConfig>, Error> {
-    let available_topics = node
-        .get_topic_names_and_types()
-        .map_err(|err| {
-            anyhow!(
-                "Failed to fetch ROS2 topics for wildcard resolution: {}",
-                err
-            )
-        })?
-        .into_keys()
-        .collect::<Vec<_>>();
+    let available_topics = available_topic_names(node)?;
 
     for topic_cfg in configured_topics {
         if topic_cfg.name.contains('*') {
@@ -108,6 +99,19 @@ pub(super) fn resolve_topics_for_subscription(
     }
 
     Ok(resolve_topic_patterns(configured_topics, &available_topics))
+}
+
+pub(super) fn available_topic_names(node: &Node) -> Result<Vec<String>, Error> {
+    Ok(node
+        .get_topic_names_and_types()
+        .map_err(|err| {
+            anyhow!(
+                "Failed to fetch ROS2 topics for wildcard resolution: {}",
+                err
+            )
+        })?
+        .into_keys()
+        .collect::<Vec<_>>())
 }
 
 pub(super) fn topic_types_by_name(node: &Node) -> Result<HashMap<String, Vec<String>>, Error> {
