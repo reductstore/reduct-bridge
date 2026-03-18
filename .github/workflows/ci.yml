@@ -92,6 +92,7 @@ jobs:
       - build_binaries
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - artifact_prefix: "bridge-ros1"
@@ -182,6 +183,7 @@ jobs:
       - build_binaries
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - artifact_prefix: "bridge-ros2-jazzy"
@@ -255,6 +257,7 @@ jobs:
       - rust_fmt
       - build_binaries
     strategy:
+      fail-fast: false
       matrix:
         include:
           - image_artifact_name: image-ros1-linux-amd64
@@ -276,12 +279,6 @@ jobs:
           bridge_artifact_name: ${{ matrix.bridge_artifact_name }}
           image_artifact_name: ${{ matrix.image_artifact_name }}
           image_tag: ${{ matrix.image_tag }}
-
-      - name: Upload image artifact (amd64)
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.image_artifact_name }}
-          path: /tmp/image.tar
 
   check_tag:
     runs-on: ubuntu-latest
