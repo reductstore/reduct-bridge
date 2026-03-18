@@ -13,6 +13,8 @@
 // limitations under the License.
 #[cfg(feature = "ros1")]
 mod ros1;
+#[cfg(feature = "ros2")]
+mod ros2;
 #[cfg(feature = "shell")]
 mod shell;
 
@@ -54,6 +56,13 @@ impl InputBuilder {
                 let input_cfg: ros1::Ros1Config = parse_entry(input_table)?;
                 debug!("Creating ROS launcher for input '{}'", input_name);
                 let launcher = ros1::Ros1Instance::new(input_cfg);
+                launcher.launch(pipeline_tx).await
+            }
+            #[cfg(feature = "ros2")]
+            "ros2" => {
+                let input_cfg: ros2::Ros2Config = parse_entry(input_table)?;
+                debug!("Creating ROS2 launcher for input '{}'", input_name);
+                let launcher = ros2::Ros2Instance::new(input_cfg);
                 launcher.launch(pipeline_tx).await
             }
             #[cfg(feature = "shell")]

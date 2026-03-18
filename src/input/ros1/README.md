@@ -45,6 +45,20 @@ labels = [
 ]
 ```
 
+## Build
+
+Build only ROS1 input support:
+
+```bash
+cargo build --no-default-features --features ros1
+```
+
+Build all inputs in one command:
+
+```bash
+cargo build --no-default-features --features all-inputs
+```
+
 ## Runtime Notes
 
 - Empty topic names are not allowed.

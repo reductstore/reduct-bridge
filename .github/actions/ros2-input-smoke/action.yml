@@ -1,0 +1,184 @@
+name: "ROS2 Input Smoke Test"
+description: "Runs reduct-bridge against ROS2 publishers and validates ReductStore records and labels."
+inputs:
+  bridge_binary:
+    description: "Path to reduct-bridge binary"
+    required: true
+  ros-setup-script:
+    description: "ROS2 setup script to source"
+    required: false
+    default: "/opt/ros/jazzy/setup.bash"
+runs:
+  using: "composite"
+  steps:
+    - uses: ./.github/actions/run-reductstore
+      with:
+        container_name: reduct-store-ros2-it
+        host_port: 8383
+        log_level: DEBUG
+
+    - name: Run ROS2 smoke test
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        set +u
+        source "${{ inputs.ros-setup-script }}"
+        set -u
+
+        BRIDGE_BIN="${{ inputs.bridge_binary }}"
+        REDUCT_URL="http://127.0.0.1:8383"
+        BUCKET="ros2-it"
+        BRIDGE_CFG="${GITHUB_WORKSPACE}/.github/configs/ros2_input_it.toml"
+        BRIDGE_LOG="/tmp/reduct-bridge-ros2-it.log"
+        ROS2_PUB_LOG="/tmp/reduct-bridge-ros2-pub.log"
+        ROS2_WARMUP_LOG="/tmp/reduct-bridge-ros2-warmup.log"
+        ROS2_PUBLISHER_SCRIPT="${GITHUB_WORKSPACE}/.github/scripts/ros2_publish.py"
+
+        rm -f /tmp/reduct-bridge-ros2-it.pid "$BRIDGE_LOG" "$ROS2_PUB_LOG" "$ROS2_WARMUP_LOG"
+
+        echo "=== [ros2-it] Creating bucket via ReductStore API ==="
+        curl -sf -X POST "${REDUCT_URL}/api/v1/b/${BUCKET}" \
+          -H "Content-Type: application/json" \
+          -d '{}' >/dev/null || true
+
+        echo "=== [ros2-it] Starting warmup ROS2 publisher for topic discovery ==="
+        timeout 15s python3 "$ROS2_PUBLISHER_SCRIPT" --message warmup --count 50 --period 0.2 >"$ROS2_WARMUP_LOG" 2>&1 &
+        WARMUP_PID=$!
+
+        echo "=== [ros2-it] Waiting for /chatter type to appear in ROS graph ==="
+        for _ in $(seq 1 30); do
+          if ros2 topic list -t 2>/dev/null | grep -Fq "/chatter [std_msgs/msg/String]"; then
+            break
+          fi
+          sleep 1
+        done
+        if ! ros2 topic list -t 2>/dev/null | grep -Fq "/chatter [std_msgs/msg/String]"; then
+          echo "ROS2 topic /chatter with type std_msgs/msg/String did not appear in time"
+          exit 1
+        fi
+
+        echo "=== [ros2-it] Starting reduct-bridge in debug mode ==="
+        chmod +x "$BRIDGE_BIN"
+        RUST_LOG=debug "$BRIDGE_BIN" "$BRIDGE_CFG" >"$BRIDGE_LOG" 2>&1 &
+        BRIDGE_PID=$!
+        echo "$BRIDGE_PID" >/tmp/reduct-bridge-ros2-it.pid
+        sleep 4
+        if ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+          echo "reduct-bridge exited before ROS2 publish phase"
+          cat "$BRIDGE_LOG" || true
+          exit 1
+        fi
+
+        if kill -0 "$WARMUP_PID" 2>/dev/null; then
+          kill "$WARMUP_PID" 2>/dev/null || true
+          wait "$WARMUP_PID" 2>/dev/null || true
+        fi
+
+        echo "=== [ros2-it] Publishing ROS2 messages ==="
+        python3 "$ROS2_PUBLISHER_SCRIPT" --message hello_ros2 --count 8 --period 0.2 >"$ROS2_PUB_LOG" 2>&1
+
+        echo "=== [ros2-it] Stopping bridge and waiting for flush ==="
+        sleep 2
+        if kill -0 "$BRIDGE_PID" 2>/dev/null; then
+          kill -INT "$BRIDGE_PID"
+          for _ in $(seq 1 30); do
+            if ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+        fi
+        if kill -0 "$BRIDGE_PID" 2>/dev/null; then
+          echo "reduct-bridge did not stop after SIGINT"
+          exit 1
+        fi
+        rm -f /tmp/reduct-bridge-ros2-it.pid
+
+        echo "=== [ros2-it] Verifying chatter label using ReductStore API ==="
+        bucket_json="$(curl -sf "${REDUCT_URL}/api/v1/b/${BUCKET}")"
+        chatter_ts="$(echo "$bucket_json" | jq -r '.entries[] | select(.name=="chatter") | .latest_record')"
+        if [[ -z "$chatter_ts" || "$chatter_ts" == "null" ]]; then
+          echo "chatter entry was not found in bucket metadata"
+          echo "$bucket_json"
+          exit 1
+        fi
+
+        chatter_head="$(curl -sfI "${REDUCT_URL}/api/v1/b/${BUCKET}/chatter?ts=${chatter_ts}")"
+        if ! echo "$chatter_head" | grep -Eiq '^content-type:\s*application/cdr\s*$'; then
+          echo "Unexpected content type in chatter record headers:"
+          echo "$chatter_head"
+          exit 1
+        fi
+        if ! echo "$chatter_head" | grep -Eiq '^x-reduct-label-message:\s*hello_ros2\s*$'; then
+          echo "message label is missing in chatter record headers:"
+          echo "$chatter_head"
+          exit 1
+        fi
+        if ! echo "$chatter_head" | grep -Eiq '^x-reduct-label-source:\s*ros2\s*$'; then
+          echo "source label is missing in chatter record headers:"
+          echo "$chatter_head"
+          exit 1
+        fi
+
+        chatter_size="$(curl -sf "${REDUCT_URL}/api/v1/b/${BUCKET}/chatter?ts=${chatter_ts}" | wc -c)"
+        if [[ "$chatter_size" -le 0 ]]; then
+          echo "ROS2 CDR payload is empty"
+          exit 1
+        fi
+
+        echo "=== [ros2-it] Verifying ROS attachment payload ==="
+        attach_head="$(curl -sfI "${REDUCT_URL}/api/v1/b/${BUCKET}/chatter/\$meta")"
+        if ! echo "$attach_head" | grep -Fq 'x-reduct-label-key: $ros'; then
+          echo "Attachment key \$ros is missing in attachment headers:"
+          echo "$attach_head"
+          exit 1
+        fi
+
+        attach_payload="$(curl -sf "${REDUCT_URL}/api/v1/b/${BUCKET}/chatter/\$meta")"
+        if ! echo "$attach_payload" | jq -e '.encoding == "cdr" and (.schema | type == "string") and (.topic == "/chatter") and (.schema_name == "std_msgs/msg/String")' >/dev/null; then
+          echo "Invalid ROS2 attachment payload:"
+          echo "$attach_payload"
+          exit 1
+        fi
+        echo "=== [ros2-it] Verification passed: chatter has message label and ROS attachment ==="
+
+    - name: Print reduct-bridge logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [ros2-it] Final logs: reduct-bridge ==="
+        if [[ -f /tmp/reduct-bridge-ros2-it.log ]]; then
+          cat /tmp/reduct-bridge-ros2-it.log || true
+        else
+          echo "bridge log file not found: /tmp/reduct-bridge-ros2-it.log"
+        fi
+
+    - name: Print ros2 publisher logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [ros2-it] Final logs: ros2 topic pub ==="
+        if [[ -f /tmp/reduct-bridge-ros2-pub.log ]]; then
+          cat /tmp/reduct-bridge-ros2-pub.log || true
+        else
+          echo "publisher log file not found: /tmp/reduct-bridge-ros2-pub.log"
+        fi
+
+    - name: Print ros2 warmup publisher logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [ros2-it] Final logs: ros2 warmup pub ==="
+        if [[ -f /tmp/reduct-bridge-ros2-warmup.log ]]; then
+          cat /tmp/reduct-bridge-ros2-warmup.log || true
+        else
+          echo "warmup log file not found: /tmp/reduct-bridge-ros2-warmup.log"
+        fi
+
+    - name: Print reductstore logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [ros2-it] Final logs: reductstore ==="
+        docker logs reduct-store-ros2-it || true

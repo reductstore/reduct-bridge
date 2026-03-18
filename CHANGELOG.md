@@ -9,4 +9,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- ROS2 input with dynamic label mapping, schema attachments, feature-gated builds, and CI coverage, [PR-5](https://github.com/reductstore/reduct-bridge/pull/5)
 - Initial implementation with ROS1 and shell inputs, [PR-3](https://github.com/reductstore/reduct-bridge/pull/3)

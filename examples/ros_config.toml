@@ -45,6 +45,31 @@ labels = [
 ]
 
 
+# ROS2 input configuration.
+# Structure: [inputs.ros2.<input_name>]
+[inputs.ros2.ros2_local]
+# ROS domain ID (optional).
+domain_id = 0
+# ROS node name for reduct-bridge (required).
+node_name = "reduct-bridge-ros2"
+# Subscriber queue size (optional, default: 128, must be > 0).
+queue_size = 128
+# Optional list of ROS installation / workspace prefixes where message schemas are stored.
+# The bridge resolves schemas from:
+#   <prefix>/share/<package>/msg/<Type>.msg
+# If omitted, it falls back to:
+#   AMENT_PREFIX_PATH, COLCON_PREFIX_PATH, CMAKE_PREFIX_PATH
+schema_paths = ["/opt/ros/jazzy"]
+
+[[inputs.ros2.ros2_local.topics]]
+name = "/chatter"
+entry_name = "ros2_time"
+labels = [
+    { field = "data", label = "message" },
+    { static = { source = "ros2" } }
+]
+
+
 # Shell inputs
 [inputs.shell.shell_timestamp]
 # Repeat command execution every N seconds.
@@ -73,7 +98,7 @@ content_type = "text/plain"
 # Which remote section to use.
 remote = "local"
 # Inputs included in this pipeline.
-inputs = ["ros_local"]
+inputs = ["ros_local", "ros2_local"]
 
 
 [pipelines.shell_pipeline]

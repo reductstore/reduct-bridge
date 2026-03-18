@@ -40,72 +40,97 @@ jobs:
       - rust_fmt
     strategy:
       matrix:
-        target:
-              [
-                "x86_64-unknown-linux-gnu",
-                "aarch64-unknown-linux-gnu",
-                "armv7-unknown-linux-gnueabihf",
-                "x86_64-pc-windows-gnu",
-                "x86_64-apple-darwin",
-                "aarch64-apple-darwin",
-              ]
         include:
-          - target: "x86_64-unknown-linux-gnu"
+          - artifact_prefix: "bridge-ros1"
+            target: "x86_64-unknown-linux-gnu"
             os: ubuntu-22.04
             compiler: "gcc"
-          - target: "aarch64-unknown-linux-gnu"
+            cargo_args: "--no-default-features --features shell,ros1"
+            ros_distro: ""
+            ros_setup_script: ""
+          - artifact_prefix: "bridge-ros2-jazzy"
+            target: "x86_64-unknown-linux-gnu"
+            os: ubuntu-24.04
+            compiler: "gcc"
+            cargo_args: "--no-default-features --features shell,ros2"
+            ros_distro: "jazzy"
+            ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-humble"
+            target: "x86_64-unknown-linux-gnu"
             os: ubuntu-22.04
-            compiler: "gcc-aarch64-linux-gnu"
-          - target: "armv7-unknown-linux-gnueabihf"
-            os: ubuntu-22.04
-            compiler: "gcc-arm-linux-gnueabihf"
-          - target: "x86_64-pc-windows-gnu"
-            os: ubuntu-22.04
-            compiler: "gcc-mingw-w64-x86-64"
-          - target: "x86_64-apple-darwin"
-            os: macos-14
-            compiler: ""
-          - target: "aarch64-apple-darwin"
-            os: macos-14
-            compiler: ""
+            compiler: "gcc"
+            cargo_args: "--no-default-features --features shell,ros2"
+            ros_distro: "humble"
+            ros_setup_script: "/opt/ros/humble/setup.bash"
     steps:
       - uses: actions/checkout@v4
+      - name: Install ROS2
+        if: ${{ matrix.ros_setup_script != '' }}
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: ${{ matrix.ros_distro }}
+      - name: Install ROS2 interface packages
+        if: ${{ matrix.ros_setup_script != '' }}
+        run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
       - uses: ./.github/actions/build-binaries
         with:
           minimal_rust_version: ${{ vars.MINIMAL_RUST_VERSION }}
           action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+          artifact-prefix: ${{ matrix.artifact_prefix }}
           target: ${{ matrix.target }}
           os: ${{ matrix.os }}
           compiler: ${{ matrix.compiler }}
           access-key-id: ${{ secrets.S3_CACHE_ACCESS_KEY }}
           secret-access-key: ${{ secrets.S3_CACHE_SECRET_KEY }}
+          cargo-args: ${{ matrix.cargo_args }}
+          ros-setup-script: ${{ matrix.ros_setup_script }}
 
   unit_tests:
     name: Run Unit Tests
     needs:
       - rust_fmt
       - build_binaries
-    strategy:
-      matrix:
-        os: [ ubuntu-24.04, windows-2022, macos-14 ]
-        include:
-          - os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-          - os: windows-2022
-            target: x86_64-pc-windows-gnu
-          - os: macos-14
-            target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact_prefix: "bridge-ros1"
+            os: ubuntu-22.04
+            ros_distro: ""
+            ros_setup_script: ""
+          - artifact_prefix: "bridge-ros2-jazzy"
+            os: ubuntu-24.04
+            ros_distro: "jazzy"
+            ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-humble"
+            os: ubuntu-22.04
+            ros_distro: "humble"
+            ros_setup_script: "/opt/ros/humble/setup.bash"
     timeout-minutes: 5
     env:
       RUST_BACKTRACE: 1
       RUST_LOG: debug
     steps:
       - uses: actions/checkout@v4
+      - name: Install ROS2
+        if: ${{ matrix.ros_setup_script != '' }}
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: ${{ matrix.ros_distro }}
+      - name: Install ROS2 interface packages
+        if: ${{ matrix.ros_setup_script != '' }}
+        run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
+      - name: Download test artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact_prefix }}-tests-x86_64-unknown-linux-gnu
+          path: ./tmp/tests
       - uses: ./.github/actions/unit-tests
         with:
           os: ${{ matrix.os }}
-          target: ${{ matrix.target }}
+          target: x86_64-unknown-linux-gnu
+          ros-setup-script: ${{ matrix.ros_setup_script }}
 
   ros1_input_integration:
     name: ROS1 Input Integration
@@ -119,15 +144,15 @@ jobs:
       - name: Download reduct-bridge Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: reduct-bridge-x86_64-unknown-linux-gnu
-          path: ./tmp/bin
+          name: bridge-ros1-x86_64-unknown-linux-gnu
+          path: ./tmp/reduct-bridge
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - uses: ./.github/actions/ros1-input-smoke
         with:
-          bridge_binary: ./tmp/bin/reduct-bridge
+          bridge_binary: ./tmp/reduct-bridge/reduct-bridge
 
   shell_input_integration:
     name: Shell Input Integration
@@ -141,37 +166,80 @@ jobs:
       - name: Download reduct-bridge Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: reduct-bridge-x86_64-unknown-linux-gnu
-          path: ./tmp/bin
+          name: bridge-ros1-x86_64-unknown-linux-gnu
+          path: ./tmp/reduct-bridge
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - uses: ./.github/actions/shell-input-smoke
         with:
-          bridge_binary: ./tmp/bin/reduct-bridge
+          bridge_binary: ./tmp/reduct-bridge/reduct-bridge
+
+  ros2_input_integration:
+    name: ROS2 Input Integration
+    needs:
+      - rust_fmt
+      - build_binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact_prefix: "bridge-ros2-jazzy"
+            os: ubuntu-24.04
+            ros_distro: "jazzy"
+            ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-humble"
+            os: ubuntu-22.04
+            ros_distro: "humble"
+            ros_setup_script: "/opt/ros/humble/setup.bash"
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ROS2
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: ${{ matrix.ros_distro }}
+      - name: Install ROS2 interface packages
+        run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
+      - name: Download reduct-bridge Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact_prefix }}-x86_64-unknown-linux-gnu
+          path: ./tmp/reduct-bridge
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - uses: ./.github/actions/ros2-input-smoke
+        with:
+          bridge_binary: ./tmp/reduct-bridge/reduct-bridge
+          ros-setup-script: ${{ matrix.ros_setup_script }}
 
   coverage:
     name: Generate Code Coverage
     needs:
       - rust_fmt
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ ubuntu-24.04 ]
-        target: [ x86_64-unknown-linux-gnu ]
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: always
       RUST_LOG: debug
     steps:
       - uses: actions/checkout@v4
+      - name: Install ROS2
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: jazzy
+      - name: Install ROS2 interface packages
+        run: sudo apt-get update && sudo apt-get install -y ros-jazzy-example-interfaces ros-jazzy-test-msgs
 
       - uses: ./.github/actions/coverage
         with:
-          os: ${{ matrix.os }}
-          target: ${{ matrix.target }}
+          os: ubuntu-24.04
+          target: x86_64-unknown-linux-gnu
           action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+          cargo-args: --no-default-features --features ci,all-inputs
+          ros-setup-script: /opt/ros/jazzy/setup.bash
 
       - name: Upload coverage to Codecov
         continue-on-error: true
@@ -188,6 +256,19 @@ jobs:
     needs:
       - rust_fmt
       - build_binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_artifact_name: image-ros1-linux-amd64
+            bridge_artifact_name: bridge-ros1-x86_64-unknown-linux-gnu
+            image_tag: reduct/bridge:ros1-test
+          - image_artifact_name: image-ros2-jazzy-linux-amd64
+            bridge_artifact_name: bridge-ros2-jazzy-x86_64-unknown-linux-gnu
+            image_tag: reduct/bridge:ros2-jazzy-test
+          - image_artifact_name: image-ros2-humble-linux-amd64
+            bridge_artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
+            image_tag: reduct/bridge:ros2-humble-test
     steps:
       - uses: actions/checkout@v4
 
@@ -195,14 +276,9 @@ jobs:
         with:
           platform: linux/amd64
           target: x86_64-unknown-linux-gnu
-          image_artifact_name: image-linux-amd64
-          image_tag: ${{ github.repository }}
-
-      - name: Upload default image artifact (amd64)
-        uses: actions/upload-artifact@v4
-        with:
-          name: image
-          path: /tmp/image.tar
+          bridge_artifact_name: ${{ matrix.bridge_artifact_name }}
+          image_artifact_name: ${{ matrix.image_artifact_name }}
+          image_tag: ${{ matrix.image_tag }}
 
   check_tag:
     runs-on: ubuntu-latest
@@ -256,55 +332,34 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     strategy:
       matrix:
-        target: [
-          "x86_64-unknown-linux-gnu",
-          "aarch64-unknown-linux-gnu",
-          "x86_64-pc-windows-gnu",
-          "x86_64-apple-darwin",
-          "aarch64-apple-darwin",
-          "armv7-unknown-linux-gnueabihf"
-        ]
+        include:
+          - artifact_name: bridge-ros1-x86_64-unknown-linux-gnu
+            asset_name: bridge-ros1.x86_64-unknown-linux-gnu.tar.gz
+          - artifact_name: bridge-ros2-jazzy-x86_64-unknown-linux-gnu
+            asset_name: bridge-ros2-jazzy.x86_64-unknown-linux-gnu.tar.gz
+          - artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
+            asset_name: bridge-ros2-humble.x86_64-unknown-linux-gnu.tar.gz
     steps:
       - uses: actions/checkout@v4
-      - name: Download ${{ matrix.target }} artifact
+      - name: Download ${{ matrix.artifact_name }} artifact
         uses: actions/download-artifact@v4
         with:
-          name: reduct-bridge-${{ matrix.target }}
+          name: ${{ matrix.artifact_name }}
           path: /tmp/
-      - name: Archive binary for UNIX
-        if: ${{ matrix.target != 'x86_64-pc-windows-gnu' }}
+      - name: Archive binary
         run: |
           cd /tmp
-          tar -czvf reduct-bridge.${{ matrix.target }}.tar.gz reduct-bridge
+          tar -czvf ${{ matrix.asset_name }} reduct-bridge
 
-      - name: Archive binary for Windows
-        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
-        run: |
-          cd /tmp
-          zip -o reduct-bridge.${{ matrix.target }}.zip reduct-bridge.exe
-
-
-      - name: Upload Linux Unix artifact
-        if: ${{ matrix.target != 'x86_64-pc-windows-gnu' }}
+      - name: Upload artifact
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ needs.make_release.outputs.upload_url }}
-          asset_path: /tmp/reduct-bridge.${{ matrix.target }}.tar.gz
-          asset_name: reduct-bridge.${{ matrix.target }}.tar.gz
+          asset_path: /tmp/${{ matrix.asset_name }}
+          asset_name: ${{ matrix.asset_name }}
           asset_content_type: application/gzip
-
-      - name: Upload Windows artifact
-        if: ${{ matrix.target == 'x86_64-pc-windows-gnu' }}
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          upload_url: ${{ needs.make_release.outputs.upload_url }}
-          asset_path: /tmp/reduct-bridge.${{ matrix.target }}.zip
-          asset_name: reduct-bridge.${{ matrix.target }}.zip
-          asset_content_type: application/zip
 
   push_image_dockerhub:
     runs-on: ubuntu-latest
@@ -318,16 +373,19 @@ jobs:
         include:
           - platform: linux/amd64
             cargo_target: x86_64-unknown-linux-gnu
-            gcc_compiler: gcc-11
-            digest: linux-amd64
-          - platform: linux/arm64
-            cargo_target: aarch64-unknown-linux-gnu
-            gcc_compiler: gcc-aarch64-linux-gnu
-            digest: linux-arm64
-          - platform: linux/arm/v7
-            cargo_target: armv7-unknown-linux-gnueabihf
-            gcc_compiler: gcc-arm-linux-gnueabihf
-            digest: linux-armv7
+            bridge_artifact_name: bridge-ros1-x86_64-unknown-linux-gnu
+            image_name: reduct/bridge
+            image_suffix: ros1
+          - platform: linux/amd64
+            cargo_target: x86_64-unknown-linux-gnu
+            bridge_artifact_name: bridge-ros2-jazzy-x86_64-unknown-linux-gnu
+            image_name: reduct/bridge
+            image_suffix: ros2-jazzy
+          - platform: linux/amd64
+            cargo_target: x86_64-unknown-linux-gnu
+            bridge_artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
+            image_name: reduct/bridge
+            image_suffix: ros2-humble
 
     steps:
       - uses: actions/checkout@v4
@@ -342,7 +400,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
         with:
-          images: ${{ env.REGISTRY_IMAGE }}
+          images: ${{ matrix.image_name }}
+          tags: |
+            type=raw,value=${{ matrix.image_suffix }}-${{ github.ref_name }}
 
       - name: Build and push Docker image to GitHub repo
         id: build
@@ -350,63 +410,11 @@ jobs:
         with:
           platform: ${{ matrix.platform }}
           target: ${{ matrix.cargo_target }}
-          image_tag: ${{ env.REGISTRY_IMAGE }}
+          bridge_artifact_name: ${{ matrix.bridge_artifact_name }}
+          image_tag: ${{ matrix.image_name }}
           docker_labels: ${{ steps.meta.outputs.labels }}
           upload_artifact: 'false'
-          build_outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-
-      - name: Export digest
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ matrix.digest }}
-          path: /tmp/digests/
-          if-no-files-found: error
-          retention-days: 1
-
-  merge_digests:
-    name: Merge digests and create manifest list
-    runs-on: ubuntu-latest
-    needs:
-      - push_image_dockerhub
-    steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          pattern: digests-*
-          path: /tmp/digests
-
-      - name: Merge digests
-        run: |
-          mkdir -p /tmp/merged_digests
-          find /tmp/digests -type f -print0 | xargs -0 mv -t /tmp/merged_digests
-          ls /tmp/merged_digests
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ env.REGISTRY_IMAGE }}
-      - name: Log in to the Container registry
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_TOKEN }}
-
-      - name: Create manifest list and push
-        working-directory: /tmp/merged_digests
-        run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+          build_outputs: type=image,name=${{ matrix.image_name }},push=true
 
 
 
