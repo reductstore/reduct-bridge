@@ -28,13 +28,18 @@ runs:
         BRIDGE_CFG="${GITHUB_WORKSPACE}/.github/configs/ros2_input_it.toml"
         BRIDGE_LOG="/tmp/reduct-bridge-ros2-it.log"
         ROS2_PUB_LOG="/tmp/reduct-bridge-ros2-pub.log"
+        ROS2_WARMUP_LOG="/tmp/reduct-bridge-ros2-warmup.log"
 
-        rm -f /tmp/reduct-bridge-ros2-it.pid "$BRIDGE_LOG" "$ROS2_PUB_LOG"
+        rm -f /tmp/reduct-bridge-ros2-it.pid "$BRIDGE_LOG" "$ROS2_PUB_LOG" "$ROS2_WARMUP_LOG"
 
         echo "=== [ros2-it] Creating bucket via ReductStore API ==="
         curl -sf -X POST "${REDUCT_URL}/api/v1/b/${BUCKET}" \
           -H "Content-Type: application/json" \
           -d '{}' >/dev/null || true
+
+        echo "=== [ros2-it] Starting warmup ROS2 publisher for topic discovery ==="
+        timeout 15s ros2 topic pub /chatter std_msgs/msg/String "{data: warmup}" >"$ROS2_WARMUP_LOG" 2>&1 &
+        WARMUP_PID=$!
 
         echo "=== [ros2-it] Starting reduct-bridge in debug mode ==="
         chmod +x "$BRIDGE_BIN"
@@ -42,6 +47,11 @@ runs:
         BRIDGE_PID=$!
         echo "$BRIDGE_PID" >/tmp/reduct-bridge-ros2-it.pid
         sleep 4
+
+        if kill -0 "$WARMUP_PID" 2>/dev/null; then
+          kill "$WARMUP_PID" 2>/dev/null || true
+          wait "$WARMUP_PID" 2>/dev/null || true
+        fi
 
         echo "=== [ros2-it] Publishing ROS2 messages ==="
         ros2 topic pub --times 8 /chatter std_msgs/msg/String "{data: hello_ros2}" >"$ROS2_PUB_LOG" 2>&1
@@ -120,6 +130,17 @@ runs:
           cat /tmp/reduct-bridge-ros2-pub.log || true
         else
           echo "publisher log file not found: /tmp/reduct-bridge-ros2-pub.log"
+        fi
+
+    - name: Print ros2 warmup publisher logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [ros2-it] Final logs: ros2 warmup pub ==="
+        if [[ -f /tmp/reduct-bridge-ros2-warmup.log ]]; then
+          cat /tmp/reduct-bridge-ros2-warmup.log || true
+        else
+          echo "warmup log file not found: /tmp/reduct-bridge-ros2-warmup.log"
         fi
 
     - name: Print reductstore logs
