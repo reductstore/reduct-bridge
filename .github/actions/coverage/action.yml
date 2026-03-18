@@ -10,6 +10,14 @@ inputs:
   action_github_token:
     description: 'GitHub token for authentication.'
     required: true
+  cargo-args:
+    description: 'Additional cargo arguments such as feature flags.'
+    required: false
+    default: ''
+  ros-setup-script:
+    description: 'Optional ROS setup script to source before cargo commands.'
+    required: false
+    default: ''
 runs:
   using: 'composite'
   steps:
@@ -29,7 +37,11 @@ runs:
         RUST_LOG: debug
       run: |
         set -e -x
-        cargo test --features ci docker_reductstore_roundtrip_data_and_attachment -- --nocapture
+        if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
+          export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          source "${{ inputs.ros-setup-script }}"
+        fi
+        cargo test ${{ inputs.cargo-args }} docker_reductstore_roundtrip_data_and_attachment -- --nocapture
 
     - name: Run code coverage
       shell: bash
@@ -38,7 +50,11 @@ runs:
         RUST_LOG: debug
       run: |
         set -e -x
-        cargo llvm-cov --workspace --lcov --output-path lcov.info
+        if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
+          export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          source "${{ inputs.ros-setup-script }}"
+        fi
+        cargo llvm-cov --workspace ${{ inputs.cargo-args }} --lcov --output-path lcov.info
 
     - name: Upload coverage artifact
       uses: actions/upload-artifact@v4

@@ -51,25 +51,45 @@ jobs:
               ]
         include:
           - target: "x86_64-unknown-linux-gnu"
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             compiler: "gcc"
+            cargo_args: "--no-default-features --features all-inputs"
+            ros_setup_script: "/opt/ros/jazzy/setup.bash"
           - target: "aarch64-unknown-linux-gnu"
             os: ubuntu-22.04
             compiler: "gcc-aarch64-linux-gnu"
+            cargo_args: ""
+            ros_setup_script: ""
           - target: "armv7-unknown-linux-gnueabihf"
             os: ubuntu-22.04
             compiler: "gcc-arm-linux-gnueabihf"
+            cargo_args: ""
+            ros_setup_script: ""
           - target: "x86_64-pc-windows-gnu"
             os: ubuntu-22.04
             compiler: "gcc-mingw-w64-x86-64"
+            cargo_args: ""
+            ros_setup_script: ""
           - target: "x86_64-apple-darwin"
             os: macos-14
             compiler: ""
+            cargo_args: ""
+            ros_setup_script: ""
           - target: "aarch64-apple-darwin"
             os: macos-14
             compiler: ""
+            cargo_args: ""
+            ros_setup_script: ""
     steps:
       - uses: actions/checkout@v4
+      - name: Install ROS2
+        if: ${{ matrix.ros_setup_script != '' }}
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: jazzy
+      - name: Install ROS2 interface packages
+        if: ${{ matrix.ros_setup_script != '' }}
+        run: sudo apt-get update && sudo apt-get install -y ros-jazzy-example-interfaces ros-jazzy-test-msgs
       - uses: ./.github/actions/build-binaries
         with:
           minimal_rust_version: ${{ vars.MINIMAL_RUST_VERSION }}
@@ -79,63 +99,32 @@ jobs:
           compiler: ${{ matrix.compiler }}
           access-key-id: ${{ secrets.S3_CACHE_ACCESS_KEY }}
           secret-access-key: ${{ secrets.S3_CACHE_SECRET_KEY }}
+          cargo-args: ${{ matrix.cargo_args }}
+          ros-setup-script: ${{ matrix.ros_setup_script }}
 
   unit_tests:
-    name: Run Default Feature Unit Tests
+    name: Run Unit Tests
     needs:
       - rust_fmt
       - build_binaries
-    strategy:
-      matrix:
-        os: [ ubuntu-24.04, windows-2022, macos-14 ]
-        include:
-          - os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-          - os: windows-2022
-            target: x86_64-pc-windows-gnu
-          - os: macos-14
-            target: aarch64-apple-darwin
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
       RUST_BACKTRACE: 1
       RUST_LOG: debug
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/unit-tests
-        with:
-          os: ${{ matrix.os }}
-          target: ${{ matrix.target }}
-
-  input_feature_tests:
-    name: Test Explicit Input Features
-    needs:
-      - rust_fmt
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Test shell feature
-        run: cargo test --no-default-features --features shell
-      - name: Test ros1 feature
-        run: cargo test --no-default-features --features ros1
       - name: Install ROS2
         uses: ros-tooling/setup-ros@v0.7
         with:
           required-ros-distributions: jazzy
       - name: Install ROS2 interface packages
         run: sudo apt-get update && sudo apt-get install -y ros-jazzy-example-interfaces ros-jazzy-test-msgs
-      - name: Test ros2 feature
-        shell: bash
-        run: |
-          source /opt/ros/jazzy/setup.bash
-          cargo test --no-default-features --features ros2
-      - name: Test all-inputs feature
-        shell: bash
-        run: |
-          source /opt/ros/jazzy/setup.bash
-          cargo test --no-default-features --features all-inputs
+      - uses: ./.github/actions/unit-tests
+        with:
+          os: ubuntu-24.04
+          target: x86_64-unknown-linux-gnu
+          ros-setup-script: /opt/ros/jazzy/setup.bash
 
   ros1_input_integration:
     name: ROS1 Input Integration
@@ -216,12 +205,20 @@ jobs:
       RUST_LOG: debug
     steps:
       - uses: actions/checkout@v4
+      - name: Install ROS2
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: jazzy
+      - name: Install ROS2 interface packages
+        run: sudo apt-get update && sudo apt-get install -y ros-jazzy-example-interfaces ros-jazzy-test-msgs
 
       - uses: ./.github/actions/coverage
         with:
           os: ${{ matrix.os }}
           target: ${{ matrix.target }}
           action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+          cargo-args: --no-default-features --features ci,all-inputs
+          ros-setup-script: /opt/ros/jazzy/setup.bash
 
       - name: Upload coverage to Codecov
         continue-on-error: true

@@ -22,6 +22,14 @@ inputs:
   secret-access-key:
     description: 'AWS Secret Access Key'
     required: true
+  cargo-args:
+    description: 'Additional cargo arguments such as feature flags.'
+    required: false
+    default: ''
+  ros-setup-script:
+    description: 'Optional ROS setup script to source before cargo commands.'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -62,8 +70,14 @@ runs:
 
     - name: Build binary (PR)
       if: github.event_name == 'pull_request'
-      run: cargo build --profile ci -p reduct-bridge --target ${{ inputs.target }}
       shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
+          export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          source "${{ inputs.ros-setup-script }}"
+        fi
+        cargo build --profile ci -p reduct-bridge --target ${{ inputs.target }} ${{ inputs.cargo-args }}
 
     - name: Upload binary (PR)
       uses: actions/upload-artifact@v4
@@ -76,8 +90,14 @@ runs:
 
     - name: Build binary (Release)
       if: github.event_name != 'pull_request'
-      run: cargo build --locked --profile release -p reduct-bridge --target ${{ inputs.target }}
       shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
+          export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          source "${{ inputs.ros-setup-script }}"
+        fi
+        cargo build --locked --profile release -p reduct-bridge --target ${{ inputs.target }} ${{ inputs.cargo-args }}
 
 
     - name: Upload binary (Release)
@@ -91,13 +111,25 @@ runs:
 
     - name: Build and export tests (PR)
       if: github.event_name == 'pull_request'
-      run: cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --bins
       shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
+          export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          source "${{ inputs.ros-setup-script }}"
+        fi
+        cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --bins ${{ inputs.cargo-args }}
 
     - name: Build and export tests (Release)
       if: github.event_name != 'pull_request'
-      run: cargo export target/${{ inputs.target }}/tests -- test --profile release --target ${{ inputs.target }} --bins
       shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
+          export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          source "${{ inputs.ros-setup-script }}"
+        fi
+        cargo export target/${{ inputs.target }}/tests -- test --profile release --target ${{ inputs.target }} --bins ${{ inputs.cargo-args }}
 
     - name: Upload tests
       uses: actions/upload-artifact@v4

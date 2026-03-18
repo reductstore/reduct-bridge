@@ -7,6 +7,10 @@ inputs:
   target:
     description: 'Target triple.'
     required: true
+  ros-setup-script:
+    description: 'Optional ROS setup script to source before running tests.'
+    required: false
+    default: ''
 runs:
   using: 'composite'
   steps:
@@ -19,6 +23,10 @@ runs:
       shell: bash
       run: |
         set -e -x
+        if [[ -n "${{ inputs.ros-setup-script }}" ]]; then
+          export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
+          source "${{ inputs.ros-setup-script }}"
+        fi
         for f in ./tmp/tests/*; do
           # exclude proc-macro helper crates that are not directly executable tests
           if [[ $f == *"reduct_macros"* ]]; then
