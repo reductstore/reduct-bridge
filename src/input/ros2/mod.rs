@@ -17,13 +17,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{Sender, channel};
 
 mod wildcard;
 
 const CHANNEL_SIZE: usize = 1024;
 const DEFAULT_QUEUE_SIZE: usize = 128;
+const TOPIC_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
+const TOPIC_DISCOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 
 fn default_queue_size() -> usize {
     DEFAULT_QUEUE_SIZE
@@ -208,12 +210,12 @@ impl Ros2Instance {
 
     fn prepare_topic_subscription(
         topic_cfg: &Ros2TopicConfig,
-        topic_types: &HashMap<String, Vec<String>>,
+        topic_type: &str,
         schema_paths: &[PathBuf],
         pipeline_tx: &Sender<Message>,
     ) -> Result<(String, String, Option<Arc<Ros2DynamicParser>>), Error> {
         let topic_name = topic_cfg.name.clone();
-        let topic_type = Self::select_topic_type(&topic_name, topic_types)?;
+        let topic_type = topic_type.to_string();
         let schema = Self::load_schema_text(&topic_type, schema_paths)?;
         let needs_dynamic_labels = Self::has_dynamic_labels(&topic_cfg.labels);
         let parser = if needs_dynamic_labels {
@@ -244,6 +246,34 @@ impl Ros2Instance {
         }
 
         Ok((topic_type, entry_name, parser))
+    }
+
+    fn wait_for_topic_type(node: &rclrs::Node, topic_name: &str) -> Result<String, Error> {
+        let started = Instant::now();
+        let mut last_err = None;
+
+        while started.elapsed() < TOPIC_DISCOVERY_TIMEOUT {
+            match wildcard::topic_types_by_name(node)
+                .and_then(|topic_types| Self::select_topic_type(topic_name, &topic_types))
+            {
+                Ok(topic_type) => return Ok(topic_type),
+                Err(err) => last_err = Some(err),
+            }
+
+            std::thread::sleep(TOPIC_DISCOVERY_RETRY_INTERVAL);
+        }
+
+        let last_err = last_err.unwrap_or_else(|| {
+            anyhow!(
+                "No ROS2 message type found for topic '{}' within {:?}",
+                topic_name,
+                TOPIC_DISCOVERY_TIMEOUT
+            )
+        });
+        Err(last_err.context(format!(
+            "Failed to discover ROS2 topic type for '{}'",
+            topic_name
+        )))
     }
 
     fn make_subscription_callback(
@@ -329,14 +359,14 @@ impl Ros2Instance {
                         );
                     }
 
-                    let topic_types = wildcard::topic_types_by_name(&node)?;
                     let mut subscriptions = Vec::new();
 
                     for topic_cfg in resolved_topics {
                         let topic_name = topic_cfg.name.clone();
+                        let topic_type = Self::wait_for_topic_type(&node, &topic_name)?;
                         let (topic_type, entry_name, parser) = Self::prepare_topic_subscription(
                             &topic_cfg,
-                            &topic_types,
+                            &topic_type,
                             &worker_cfg.schema_paths,
                             &pipeline_tx,
                         )?;

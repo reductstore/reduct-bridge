@@ -130,67 +130,71 @@ jobs:
     name: ROS1 Input Integration
     needs:
       - rust_fmt
-    runs-on: ubuntu-22.04
+      - build_binaries
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Build ROS1 bridge binary
-        run: cargo build --profile ci --no-default-features --features ros1
+      - name: Download reduct-bridge Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: reduct-bridge-x86_64-unknown-linux-gnu
+          path: ./tmp/reduct-bridge
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - uses: ./.github/actions/ros1-input-smoke
         with:
-          bridge_binary: ./target/ci/reduct-bridge
+          bridge_binary: ./tmp/reduct-bridge/reduct-bridge
 
   shell_input_integration:
     name: Shell Input Integration
     needs:
       - rust_fmt
-    runs-on: ubuntu-22.04
+      - build_binaries
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Build shell bridge binary
-        run: cargo build --profile ci --no-default-features --features shell
+      - name: Download reduct-bridge Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: reduct-bridge-x86_64-unknown-linux-gnu
+          path: ./tmp/reduct-bridge
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - uses: ./.github/actions/shell-input-smoke
         with:
-          bridge_binary: ./target/ci/reduct-bridge
+          bridge_binary: ./tmp/reduct-bridge/reduct-bridge
 
   ros2_input_integration:
     name: ROS2 Input Integration
     needs:
       - rust_fmt
+      - build_binaries
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - name: Install ROS2
         uses: ros-tooling/setup-ros@v0.7
         with:
           required-ros-distributions: jazzy
       - name: Install ROS2 interface packages
         run: sudo apt-get update && sudo apt-get install -y ros-jazzy-example-interfaces ros-jazzy-test-msgs
-      - name: Build ROS2 bridge binary
-        shell: bash
-        run: |
-          set +u
-          source /opt/ros/jazzy/setup.bash
-          set -u
-          cargo build --profile ci --no-default-features --features ros2
+      - name: Download reduct-bridge Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: reduct-bridge-x86_64-unknown-linux-gnu
+          path: ./tmp/reduct-bridge
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: ./.github/actions/ros2-input-smoke
         with:
-          bridge_binary: ./target/ci/reduct-bridge
+          bridge_binary: ./tmp/reduct-bridge/reduct-bridge
 
   coverage:
     name: Generate Code Coverage
