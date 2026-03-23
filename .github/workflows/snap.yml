@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [default, ros1, ros2-jazzy]
+        variant: [ros1, ros2]
     env:
       SNAP_BUILD_VARIANT: ${{ matrix.variant }}
     steps:
@@ -37,6 +37,22 @@ jobs:
           fi
           sudo lxd waitready
           sudo lxd init --auto
+
+      - name: Sync Snap metadata from README
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          summary = Path('README.md').read_text().split('ReductBridge bridges', 1)[1].splitlines()[0]
+          summary = 'ReductBridge bridges' + summary
+
+          path = Path('snap/snapcraft.yaml')
+          text = path.read_text()
+          text = re.sub(r'^summary:.*$', f'summary: {summary}', text, flags=re.M)
+          text = re.sub(r'description: \|\n(?:  .*\n)+\ngrade:', f'description: |\n  {summary}\n\ngrade:', text, flags=re.M)
+          path.write_text(text)
+          PY
 
       - name: Build snap
         run: snapcraft --use-lxd
@@ -67,14 +83,14 @@ jobs:
           fi
 
           case "$SNAP_BUILD_VARIANT" in
-            default)
-              RELEASE_CHANNELS="$SNAP_CHANNELS_EDGE,$SNAP_CHANNELS_STABLE"
-              ;;
             ros1)
               RELEASE_CHANNELS="ros1/$SNAP_CHANNELS_EDGE,ros1/$SNAP_CHANNELS_STABLE"
               ;;
-            ros2-jazzy)
-              RELEASE_CHANNELS="ros2-jazzy/$SNAP_CHANNELS_EDGE,ros2-jazzy/$SNAP_CHANNELS_STABLE"
+            ros2)
+              RELEASE_CHANNELS="ros2/$SNAP_CHANNELS_EDGE,ros2/$SNAP_CHANNELS_STABLE"
+              ;;
+            *)
+              echo "Unsupported SNAP_BUILD_VARIANT: $SNAP_BUILD_VARIANT" && exit 1
               ;;
           esac
 

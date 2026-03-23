@@ -63,7 +63,7 @@ parts:
         ros1)
           FEATURES="ros1"
           ;;
-        ros2-jazzy)
+        ros2)
           FEATURES="ros2"
           ;;
         *)
