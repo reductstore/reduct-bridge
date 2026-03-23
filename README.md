@@ -58,6 +58,40 @@ labels = [
 
 ## Installation
 
+### Snap (Ubuntu 22.04+)
+
+```bash
+sudo snap install reduct-bridge --channel=edge   # or --channel=stable once released
+```
+
+The snap ships both the CLI (`reduct-bridge`) and an optional managed service.
+
+1. Copy your configuration into `/var/snap/reduct-bridge/common/config.toml` (a template is
+   created automatically on install):
+
+   ```bash
+   sudo cp path/to/config.toml /var/snap/reduct-bridge/common/config.toml
+   sudo chmod 640 /var/snap/reduct-bridge/common/config.toml
+   ```
+
+2. Run the CLI manually when needed:
+
+   ```bash
+   reduct-bridge /var/snap/reduct-bridge/common/config.toml
+   ```
+
+3. Or enable the built-in service so it starts on boot and restarts on failure:
+
+   ```bash
+   sudo snap start --enable reduct-bridge.service
+   sudo snap logs -f reduct-bridge
+   ```
+
+Snaps auto-refresh by default; switch channels or hold refreshes with `snap refresh`. The service
+can be configured via `snap stop/start reduct-bridge.service` after editing the config file.
+
+### Cargo / source build
+
 ```bash
 cargo install reduct-bridge
 ```

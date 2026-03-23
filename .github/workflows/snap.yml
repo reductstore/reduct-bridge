@@ -1,0 +1,57 @@
+name: snap
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'snap/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/snap.yml'
+  release:
+    types: [ published ]
+  workflow_dispatch:
+
+env:
+  SNAP_CHANNELS_EDGE: edge
+  SNAP_CHANNELS_STABLE: stable
+
+jobs:
+  snap-build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install snapcraft + lxd
+        run: |
+          sudo snap install snapcraft --classic
+          if ! snap list lxd > /dev/null 2>&1; then
+            sudo snap install lxd
+          fi
+          sudo lxd waitready
+          sudo lxd init --auto
+
+      - name: Build snap
+        run: snapcraft --use-lxd
+
+      - name: Lint snap
+        run: snapcraft lint .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reduct-bridge.snap
+          path: '*.snap'
+
+      - name: Publish to Snap Store
+        if: github.event_name == 'release'
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
+            echo "Snap Store credentials missing; skipping publish" && exit 0
+          fi
+          SNAP_FILE=$(ls *.snap)
+          snapcraft upload --release="$SNAP_CHANNELS_EDGE" "$SNAP_FILE"
+          snapcraft upload --release="$SNAP_CHANNELS_STABLE" "$SNAP_FILE"

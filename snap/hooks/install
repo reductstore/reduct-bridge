@@ -1,0 +1,9 @@
+#!/bin/sh
+set -euo pipefail
+CONFIG_PATH="$SNAP_COMMON/config.toml"
+DEFAULT_CONFIG="$SNAP/etc/reduct-bridge/config.example.toml"
+
+mkdir -p "$(dirname "$CONFIG_PATH")"
+if [ ! -f "$CONFIG_PATH" ] && [ -f "$DEFAULT_CONFIG" ]; then
+  cp "$DEFAULT_CONFIG" "$CONFIG_PATH"
+fi

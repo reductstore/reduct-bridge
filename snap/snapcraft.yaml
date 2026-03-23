@@ -1,0 +1,51 @@
+name: reduct-bridge
+base: core22
+version: git
+summary: Bridge live robotics and IIoT streams into ReductStore
+description: |
+  ReductBridge connects live robotics and IIoT data sources to durable storage in ReductStore.
+  Configure shell, ROS1, or ROS2 inputs together with ReductStore remotes using a TOML
+  configuration file, then let the bridge manage buffering, batching, and delivery.
+  
+  This snap ships the reduct-bridge daemon and CLI. Place your configuration in
+  /var/snap/reduct-bridge/common/config.toml and either run the CLI manually or
+  enable the managed service that ships with the snap.
+
+grade: stable
+confinement: strict
+
+apps:
+  reduct-bridge:
+    command: bin/reduct-bridge
+    plugs:
+      - network
+      - network-bind
+      - system-observe
+  service:
+    command: bin/reduct-bridge-daemon
+    daemon: simple
+    install-mode: disable
+    restart-condition: on-failure
+    plugs:
+      - network
+      - network-bind
+      - system-observe
+
+parts:
+  reduct-bridge:
+    plugin: rust
+    source: ..
+    build-packages:
+      - build-essential
+      - pkg-config
+      - libssl-dev
+      - clang
+    stage-packages:
+      - libssl3
+      - libgcc-s1
+      - libstdc++6
+      - ca-certificates
+    override-build: |
+      craftctl default
+      install -Dm755 snap/local/start-daemon.sh "$CRAFT_PART_INSTALL/bin/reduct-bridge-daemon"
+      install -Dm644 snap/local/config.toml "$CRAFT_PART_INSTALL/etc/reduct-bridge/config.example.toml"
