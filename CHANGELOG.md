@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Official Snap packaging, CI publish workflow, and README installation docs, [PR-10](https://github.com/reductstore/reduct-bridge/pull/10)
+
 ## 0.1.1 - 2026-03-19
 
 ### Fixed
