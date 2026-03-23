@@ -61,40 +61,39 @@ labels = [
 ### Snap (Ubuntu 22.04+)
 
 ```bash
-sudo snap install reduct-bridge --channel=edge   # or --channel=stable once released
-# Optional variant tracks:
-#   --channel=ros1/edge
-#   --channel=ros2/edge
+sudo snap install reduct-bridge-ros1 --channel=edge   # or --channel=stable once released
+# Or install the ROS2 package instead:
+sudo snap install reduct-bridge-ros2 --channel=edge
 ```
 
 The snap ships both the CLI (`reduct-bridge`) and an optional managed service.
 
-1. Copy your configuration into `/var/snap/reduct-bridge/common/config.toml` (a template is
+1. Copy your configuration into `/var/snap/<snap-name>/common/config.toml` (a template is
    created automatically on install):
 
    ```bash
-   sudo cp path/to/config.toml /var/snap/reduct-bridge/common/config.toml
-   sudo chmod 640 /var/snap/reduct-bridge/common/config.toml
+   sudo cp path/to/config.toml /var/snap/reduct-bridge-ros1/common/config.toml
+   sudo chmod 640 /var/snap/reduct-bridge-ros1/common/config.toml
    ```
 
 2. Run the CLI manually when needed:
 
    ```bash
-   reduct-bridge /var/snap/reduct-bridge/common/config.toml
+   reduct-bridge /var/snap/reduct-bridge-ros1/common/config.toml
    ```
 
 3. Or enable the built-in service so it starts on boot and restarts on failure:
 
    ```bash
-   sudo snap start --enable reduct-bridge.service
-   sudo snap logs -f reduct-bridge
+   sudo snap start --enable reduct-bridge-ros1.service
+   sudo snap logs -f reduct-bridge-ros1
    ```
 
 Snaps auto-refresh by default; switch channels or hold refreshes with `snap refresh`. The service
-can be configured via `snap stop/start reduct-bridge.service` after editing the config file.
+can be configured via `snap stop/start <snap-name>.service` after editing the config file.
 
-Release CI builds snap artifacts for `ros1` and `ros2` variants and publishes them to the matching
-channels/tracks.
+Release CI builds separate `reduct-bridge-ros1` and `reduct-bridge-ros2` snap packages and
+publishes them to the standard channels.
 
 ### Cargo / source build
 

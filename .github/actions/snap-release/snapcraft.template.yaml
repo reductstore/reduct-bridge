@@ -1,0 +1,52 @@
+title: __SNAP_TITLE__
+name: __SNAP_NAME__
+base: core22
+version: git
+summary: __SNAP_SUMMARY__
+description: |
+  __SNAP_DESCRIPTION__
+contact: info@reduct.store
+issues: https://github.com/reductstore/reduct-bridge/issues
+source-code: https://github.com/reductstore/reduct-bridge.git
+website: https://reduct.store
+license: Apache-2.0
+
+grade: stable
+confinement: strict
+
+apps:
+  reduct-bridge:
+    command: bin/reduct-bridge
+    plugs:
+      - network
+      - network-bind
+      - system-observe
+  service:
+    command: bin/reduct-bridge-daemon
+    daemon: simple
+    install-mode: disable
+    restart-condition: on-failure
+    plugs:
+      - network
+      - network-bind
+      - system-observe
+
+parts:
+  binary:
+    plugin: dump
+    source: .snap-build/bin
+    organize:
+      reduct-bridge: bin/reduct-bridge
+
+  runtime:
+    plugin: dump
+    source: snap/local
+    organize:
+      start-daemon.sh: bin/reduct-bridge-daemon
+      config.toml: etc/reduct-bridge/config.example.toml
+
+  hooks:
+    plugin: dump
+    source: snap/hooks
+    organize:
+      install: snap/hooks/install

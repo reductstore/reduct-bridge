@@ -17,17 +17,57 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Resolve snap package inputs
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        case "${{ inputs.variant }}" in
+          ros1)
+            echo "SNAP_TITLE=ReductBridge for ROS1" >> "$GITHUB_ENV"
+            echo "SNAP_NAME=reduct-bridge-ros1" >> "$GITHUB_ENV"
+            echo "BINARY_ARTIFACT=bridge-ros1-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
+            ;;
+          ros2)
+            echo "SNAP_TITLE=ReductBridge for ROS2" >> "$GITHUB_ENV"
+            echo "SNAP_NAME=reduct-bridge-ros2" >> "$GITHUB_ENV"
+            echo "BINARY_ARTIFACT=bridge-ros2-humble-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
+            ;;
+          *)
+            echo "Unsupported variant: ${{ inputs.variant }}"
+            exit 1
+            ;;
+        esac
+
+    - name: Download binary artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.BINARY_ARTIFACT }}
+        path: .snap-build/bin
+
+    - name: Prepare snap payload files
+      shell: bash
+      run: |
+        set -euo pipefail
+        chmod +x .snap-build/bin/reduct-bridge
+        chmod +x snap/local/start-daemon.sh
+        chmod +x snap/hooks/install
+
     - name: Install snapcraft
       shell: bash
       run: |
         set -euo pipefail
         sudo snap install snapcraft --classic
 
-    - name: Sync Snap metadata from README
+    - name: Generate snapcraft manifest
+      env:
+        SNAP_NAME: ${{ env.SNAP_NAME }}
+        SNAP_TITLE: ${{ env.SNAP_TITLE }}
       shell: bash
       run: |
         set -euo pipefail
         python - <<'PY'
+        import os
         from pathlib import Path
         import re
         import textwrap
@@ -37,14 +77,18 @@ runs:
         if not match:
           raise SystemExit("Could not find ReductBridge summary line in README.md")
 
+        snap_name = os.environ["SNAP_NAME"]
+        snap_title = os.environ["SNAP_TITLE"]
         description = match.group(1).strip()
         summary = textwrap.shorten(description, width=78, placeholder='...')
+        indented_description = description.replace('\n', '\n  ')
 
-        path = Path('snap/snapcraft.yaml')
-        text = path.read_text()
-        text = re.sub(r'^summary:.*$', f'summary: {summary}', text, flags=re.M)
-        text = re.sub(r'description: \|\n(?:  .*\n)+\ngrade:', f'description: |\n  {description}\n\ngrade:', text, flags=re.M)
-        path.write_text(text)
+        template = Path('.github/actions/snap-release/snapcraft.template.yaml').read_text()
+        text = template.replace('__SNAP_TITLE__', snap_title)
+        text = text.replace('__SNAP_NAME__', snap_name)
+        text = text.replace('__SNAP_SUMMARY__', summary)
+        text = text.replace('__SNAP_DESCRIPTION__', indented_description)
+        Path('snap/snapcraft.yaml').write_text(text)
         PY
 
     - name: Build snap
@@ -53,7 +97,7 @@ runs:
         set -euo pipefail
         mkdir -p snapcraft-logs
         LOG_FILE="snapcraft-logs/build-${{ inputs.variant }}.log"
-        if ! SNAP_BUILD_VARIANT="${{ inputs.variant }}" snapcraft pack --destructive-mode 2>&1 | tee "$LOG_FILE"; then
+        if ! snapcraft pack --destructive-mode 2>&1 | tee "$LOG_FILE"; then
           cp -a "$HOME/.local/state/snapcraft/log/." snapcraft-logs/ 2>/dev/null || true
           exit 1
         fi
@@ -71,11 +115,13 @@ runs:
         fi
 
     - name: Rename artifact with variant
+      env:
+        SNAP_NAME: ${{ env.SNAP_NAME }}
       shell: bash
       run: |
         set -euo pipefail
         SNAP_FILE=$(ls *.snap)
-        RENAMED_FILE="reduct-bridge-${{ inputs.variant }}.snap"
+        RENAMED_FILE="${SNAP_NAME}.snap"
         mv "$SNAP_FILE" "$RENAMED_FILE"
         echo "SNAP_FILE=$RENAMED_FILE" >> "$GITHUB_ENV"
 
@@ -83,7 +129,7 @@ runs:
       if: inputs.upload_artifact == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: reduct-bridge-${{ inputs.variant }}.snap
+        name: ${{ env.SNAP_NAME }}.snap
         path: ${{ env.SNAP_FILE }}
 
     - name: Upload snapcraft logs on failure
@@ -106,17 +152,4 @@ runs:
           exit 0
         fi
 
-        case "${{ inputs.variant }}" in
-          ros1)
-            RELEASE_CHANNEL="ros1/${{ inputs.publish_channel }}"
-            ;;
-          ros2)
-            RELEASE_CHANNEL="ros2/${{ inputs.publish_channel }}"
-            ;;
-          *)
-            echo "Unsupported variant: ${{ inputs.variant }}"
-            exit 1
-            ;;
-        esac
-
-        snapcraft upload --release="$RELEASE_CHANNEL" "$SNAP_FILE"
+        snapcraft upload --release="${{ inputs.publish_channel }}" "$SNAP_FILE"
