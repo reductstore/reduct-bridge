@@ -74,7 +74,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
       - uses: ./.github/actions/build-binaries
         with:
-          minimal_rust_version: ${{ vars.MINIMAL_RUST_VERSION }}
+          minimal_rust_version: ${{ vars.MINIMAL_RUST_VERSION || 'stable' }}
           action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
           artifact-prefix: ${{ matrix.artifact_prefix }}
           target: ${{ matrix.target }}
