@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Official Snap packaging, ROS1/ROS2-jazzy variant build matrix, CI publish workflow, and README installation docs
+- Official Snap packaging, ROS1/ROS2-jazzy variant build matrix, CI publish workflow, and README installation docs, [PR-12](https://github.com/reductstore/reduct-bridge/pull/12)
 
 ## 0.1.1 - 2026-03-19
 
