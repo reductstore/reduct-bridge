@@ -42,7 +42,6 @@ parts:
       - clang
       - curl
       - libclang-dev
-      - rustup
     stage-packages:
       - libssl3
       - libgcc-s1
@@ -51,7 +50,17 @@ parts:
     override-build: |
       set -euo pipefail
 
-      export PATH="$HOME/.cargo/bin:$PATH"
+      if ! command -v rustup >/dev/null 2>&1; then
+        curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+      fi
+
+      # Match the working reductstore snap pattern and ensure cargo/rustup are on PATH.
+      if [ -f "$HOME/.cargo/env" ]; then
+        . "$HOME/.cargo/env"
+      else
+        export PATH="$HOME/.cargo/bin:$PATH"
+      fi
+
       rustup toolchain install stable --profile minimal
       rustup default stable
 
