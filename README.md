@@ -62,6 +62,9 @@ labels = [
 
 ```bash
 sudo snap install reduct-bridge --channel=edge   # or --channel=stable once released
+# Optional variant tracks:
+#   --channel=ros1/edge
+#   --channel=ros2-jazzy/edge
 ```
 
 The snap ships both the CLI (`reduct-bridge`) and an optional managed service.
@@ -89,6 +92,9 @@ The snap ships both the CLI (`reduct-bridge`) and an optional managed service.
 
 Snaps auto-refresh by default; switch channels or hold refreshes with `snap refresh`. The service
 can be configured via `snap stop/start reduct-bridge.service` after editing the config file.
+
+Release CI builds snap artifacts for `default`, `ros1`, and `ros2-jazzy` variants and publishes
+them to the matching channels/tracks.
 
 ### Cargo / source build
 

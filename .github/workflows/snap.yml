@@ -20,6 +20,12 @@ env:
 jobs:
   snap-build:
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [default, ros1, ros2-jazzy]
+    env:
+      SNAP_BUILD_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@v4
 
@@ -38,11 +44,18 @@ jobs:
       - name: Lint snap
         run: snapcraft lint .
 
+      - name: Rename artifact with variant
+        run: |
+          SNAP_FILE=$(ls *.snap)
+          RENAMED_FILE="reduct-bridge-${SNAP_BUILD_VARIANT}.snap"
+          mv "$SNAP_FILE" "$RENAMED_FILE"
+          echo "SNAP_FILE=$RENAMED_FILE" >> "$GITHUB_ENV"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: reduct-bridge.snap
-          path: '*.snap'
+          name: reduct-bridge-${{ matrix.variant }}.snap
+          path: ${{ env.SNAP_FILE }}
 
       - name: Publish to Snap Store
         if: github.event_name == 'release'
@@ -52,6 +65,17 @@ jobs:
           if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
             echo "Snap Store credentials missing; skipping publish" && exit 0
           fi
-          SNAP_FILE=$(ls *.snap)
-          snapcraft upload --release="$SNAP_CHANNELS_EDGE" "$SNAP_FILE"
-          snapcraft upload --release="$SNAP_CHANNELS_STABLE" "$SNAP_FILE"
+
+          case "$SNAP_BUILD_VARIANT" in
+            default)
+              RELEASE_CHANNELS="$SNAP_CHANNELS_EDGE,$SNAP_CHANNELS_STABLE"
+              ;;
+            ros1)
+              RELEASE_CHANNELS="ros1/$SNAP_CHANNELS_EDGE,ros1/$SNAP_CHANNELS_STABLE"
+              ;;
+            ros2-jazzy)
+              RELEASE_CHANNELS="ros2-jazzy/$SNAP_CHANNELS_EDGE,ros2-jazzy/$SNAP_CHANNELS_STABLE"
+              ;;
+          esac
+
+          snapcraft upload --release="$RELEASE_CHANNELS" "$SNAP_FILE"
