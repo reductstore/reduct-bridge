@@ -35,14 +35,20 @@ runs:
         python - <<'PY'
         from pathlib import Path
         import re
+        import textwrap
 
-        summary = Path('README.md').read_text().split('ReductBridge bridges', 1)[1].splitlines()[0]
-        summary = 'ReductBridge bridges' + summary
+        readme = Path('README.md').read_text()
+        match = re.search(r'^(ReductBridge bridges .+)$', readme, flags=re.M)
+        if not match:
+          raise SystemExit("Could not find ReductBridge summary line in README.md")
+
+        description = match.group(1).strip()
+        summary = textwrap.shorten(description, width=78, placeholder='...')
 
         path = Path('snap/snapcraft.yaml')
         text = path.read_text()
         text = re.sub(r'^summary:.*$', f'summary: {summary}', text, flags=re.M)
-        text = re.sub(r'description: \|\n(?:  .*\n)+\ngrade:', f'description: |\n  {summary}\n\ngrade:', text, flags=re.M)
+        text = re.sub(r'description: \|\n(?:  .*\n)+\ngrade:', f'description: |\n  {description}\n\ngrade:', text, flags=re.M)
         path.write_text(text)
         PY
 
