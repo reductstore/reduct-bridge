@@ -91,6 +91,13 @@ runs:
         Path('snap/snapcraft.yaml').write_text(text)
         PY
 
+    - name: Print generated snapcraft manifest
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "--- snap/snapcraft.yaml ---"
+        sed -n '1,240p' snap/snapcraft.yaml
+
     - name: Build snap
       shell: bash
       run: |
