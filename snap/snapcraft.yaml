@@ -1,0 +1,79 @@
+name: reduct-bridge
+base: core22
+version: git
+summary: Bridge live robotics and IIoT streams into ReductStore
+description: |
+  ReductBridge connects live robotics and IIoT data sources to durable storage in ReductStore.
+  Configure shell, ROS1, or ROS2 inputs together with ReductStore remotes using a TOML
+  configuration file, then let the bridge manage buffering, batching, and delivery.
+
+  This snap ships the reduct-bridge daemon and CLI. Place your configuration in
+  /var/snap/reduct-bridge/common/config.toml and either run the CLI manually or
+  enable the managed service that ships with the snap.
+
+grade: stable
+confinement: strict
+
+apps:
+  reduct-bridge:
+    command: bin/reduct-bridge
+    plugs:
+      - network
+      - network-bind
+      - system-observe
+  service:
+    command: bin/reduct-bridge-daemon
+    daemon: simple
+    install-mode: disable
+    restart-condition: on-failure
+    plugs:
+      - network
+      - network-bind
+      - system-observe
+
+parts:
+  reduct-bridge:
+    plugin: nil
+    source: ..
+    build-packages:
+      - build-essential
+      - pkg-config
+      - libssl-dev
+      - clang
+      - curl
+      - libclang-dev
+      - rustup
+    stage-packages:
+      - libssl3
+      - libgcc-s1
+      - libstdc++6
+      - ca-certificates
+    override-build: |
+      set -euo pipefail
+
+      export PATH="$HOME/.cargo/bin:$PATH"
+      rustup toolchain install stable --profile minimal
+      rustup default stable
+
+      VARIANT="${SNAP_BUILD_VARIANT:-default}"
+      case "$VARIANT" in
+        default)
+          FEATURES="shell"
+          ;;
+        ros1)
+          FEATURES="ros1"
+          ;;
+        ros2)
+          FEATURES="ros2"
+          ;;
+        *)
+          echo "Unsupported SNAP_BUILD_VARIANT: $VARIANT"
+          exit 1
+          ;;
+      esac
+
+      cargo build --release --locked --no-default-features --features "$FEATURES"
+
+      install -Dm755 target/release/reduct-bridge "$CRAFT_PART_INSTALL/bin/reduct-bridge"
+      install -Dm755 snap/local/start-daemon.sh "$CRAFT_PART_INSTALL/bin/reduct-bridge-daemon"
+      install -Dm644 snap/local/config.toml "$CRAFT_PART_INSTALL/etc/reduct-bridge/config.example.toml"

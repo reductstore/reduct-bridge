@@ -1,30 +1,102 @@
 name: 'Build and Publish Snap Package'
-description: 'Builds a snap package and publishes it to the Snap Store.'
+description: 'Builds reduct-bridge snap variants and publishes them to the Snap Store channels.'
 inputs:
-  arch:
-    description: 'Architecture (amd64, arm64, etc.)'
+  variant:
+    description: 'Build variant track (ros1 or ros2).'
     required: true
-  snapcraft_store_login:
-    description: 'Snapcraft store login credentials.'
+  publish_channel:
+    description: 'Snap channel to publish into (edge or stable).'
     required: true
-  release:
-    description: 'Release channel (stable/edge)'
-    required: true
+  snapcraft_store_credentials:
+    description: 'Snapcraft store credentials.'
+    required: false
+  upload_artifact:
+    description: 'Upload built snap as workflow artifact.'
+    required: false
+    default: 'true'
 runs:
   using: 'composite'
   steps:
-    - uses: snapcore/action-build@v1
-      id: build-snap
+    - name: Install snapcraft + lxd
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo snap install snapcraft --classic
+        if ! snap list lxd > /dev/null 2>&1; then
+          sudo snap install lxd
+        fi
+        sudo lxd waitready
+        sudo lxd init --auto
+
+    - name: Sync Snap metadata from README
+      shell: bash
+      run: |
+        set -euo pipefail
+        python - <<'PY'
+        from pathlib import Path
+        import re
+
+        summary = Path('README.md').read_text().split('ReductBridge bridges', 1)[1].splitlines()[0]
+        summary = 'ReductBridge bridges' + summary
+
+        path = Path('snap/snapcraft.yaml')
+        text = path.read_text()
+        text = re.sub(r'^summary:.*$', f'summary: {summary}', text, flags=re.M)
+        text = re.sub(r'description: \|\n(?:  .*\n)+\ngrade:', f'description: |\n  {summary}\n\ngrade:', text, flags=re.M)
+        path.write_text(text)
+        PY
+
+    - name: Build snap
+      shell: bash
+      run: |
+        set -euo pipefail
+        SNAP_BUILD_VARIANT="${{ inputs.variant }}" snapcraft --use-lxd
+
+    - name: Lint snap
+      shell: bash
+      run: |
+        set -euo pipefail
+        snapcraft lint .
+
+    - name: Rename artifact with variant
+      shell: bash
+      run: |
+        set -euo pipefail
+        SNAP_FILE=$(ls *.snap)
+        RENAMED_FILE="reduct-bridge-${{ inputs.variant }}.snap"
+        mv "$SNAP_FILE" "$RENAMED_FILE"
+        echo "SNAP_FILE=$RENAMED_FILE" >> "$GITHUB_ENV"
+
+    - name: Upload artifact
+      if: inputs.upload_artifact == 'true'
+      uses: actions/upload-artifact@v4
       with:
-        snapcraft-args: "--enable-experimental-extensions --verbose --target-arch=${{ inputs.arch }}"
+        name: reduct-bridge-${{ inputs.variant }}.snap
+        path: ${{ env.SNAP_FILE }}
 
-    - name: Install snap for testing
+    - name: Publish to Snap Store
       shell: bash
+      env:
+        SNAPCRAFT_STORE_CREDENTIALS: ${{ inputs.snapcraft_store_credentials }}
       run: |
-        sudo snap install --dangerous ${{ steps.build-snap.outputs.snap }}
-        snap services reductstore
+        set -euo pipefail
 
-    - name: Save snap name in environment variable
-      shell: bash
-      run: |
-        echo "SNAP_NAME=$(ls *.snap | cut -f1 | grep ${{ inputs.arch }})" >> $GITHUB_ENV
+        if [ -z "${SNAPCRAFT_STORE_CREDENTIALS:-}" ]; then
+          echo "Snap Store credentials missing; skipping publish"
+          exit 0
+        fi
+
+        case "${{ inputs.variant }}" in
+          ros1)
+            RELEASE_CHANNEL="ros1/${{ inputs.publish_channel }}"
+            ;;
+          ros2)
+            RELEASE_CHANNEL="ros2/${{ inputs.publish_channel }}"
+            ;;
+          *)
+            echo "Unsupported variant: ${{ inputs.variant }}"
+            exit 1
+            ;;
+        esac
+
+        snapcraft upload --release="$RELEASE_CHANNEL" "$SNAP_FILE"
