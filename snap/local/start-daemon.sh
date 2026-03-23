@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -euo pipefail
 CONFIG_PATH="$SNAP_COMMON/config.toml"
 DEFAULT_CONFIG="$SNAP/etc/reduct-bridge/config.example.toml"

@@ -34,7 +34,7 @@ apps:
 parts:
   reduct-bridge:
     plugin: nil
-    source: ..
+    source: .
     build-packages:
       - build-essential
       - pkg-config
