@@ -17,16 +17,11 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install snapcraft + lxd
+    - name: Install snapcraft
       shell: bash
       run: |
         set -euo pipefail
         sudo snap install snapcraft --classic
-        if ! snap list lxd > /dev/null 2>&1; then
-          sudo snap install lxd
-        fi
-        sudo lxd waitready
-        sudo lxd init --auto
 
     - name: Sync Snap metadata from README
       shell: bash
@@ -56,13 +51,24 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        SNAP_BUILD_VARIANT="${{ inputs.variant }}" snapcraft --use-lxd
+        mkdir -p snapcraft-logs
+        LOG_FILE="snapcraft-logs/build-${{ inputs.variant }}.log"
+        if ! SNAP_BUILD_VARIANT="${{ inputs.variant }}" snapcraft pack --destructive-mode 2>&1 | tee "$LOG_FILE"; then
+          cp -a "$HOME/.local/state/snapcraft/log/." snapcraft-logs/ 2>/dev/null || true
+          exit 1
+        fi
 
     - name: Lint snap
       shell: bash
       run: |
         set -euo pipefail
-        snapcraft lint .
+        mkdir -p snapcraft-logs
+        SNAP_FILE=$(ls *.snap)
+        LOG_FILE="snapcraft-logs/lint-${{ inputs.variant }}.log"
+        if ! snapcraft lint "$SNAP_FILE" 2>&1 | tee "$LOG_FILE"; then
+          cp -a "$HOME/.local/state/snapcraft/log/." snapcraft-logs/ 2>/dev/null || true
+          exit 1
+        fi
 
     - name: Rename artifact with variant
       shell: bash
@@ -79,6 +85,14 @@ runs:
       with:
         name: reduct-bridge-${{ inputs.variant }}.snap
         path: ${{ env.SNAP_FILE }}
+
+    - name: Upload snapcraft logs on failure
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: snapcraft-logs-${{ inputs.variant }}
+        path: snapcraft-logs
+        if-no-files-found: ignore
 
     - name: Publish to Snap Store
       shell: bash
