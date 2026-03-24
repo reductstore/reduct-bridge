@@ -14,15 +14,24 @@ if [ ! -f "$CONFIG_PATH" ]; then
     cp "$DEFAULT_CONFIG" "$CONFIG_PATH"
   else
     cat <<'TEMPLATE' > "$CONFIG_PATH"
-[remotes.local]
+[[remotes.reduct]]
+name = "local"
 url = "https://play.reduct.store"
-token = "reductstore"
+token_api = "reductstore"
+bucket = "snap"
+prefix = "bridge/"
+
+[inputs.shell.telemetry]
+repeat_interval = 5
+command = "echo hello"
+entry_name = "telemetry"
+content_type = "text/plain"
 
 [pipelines.default]
 remote = "local"
-inputs = []
+inputs = ["telemetry"]
 TEMPLATE
   fi
 fi
 
-exec "$SNAP/bin/reduct-bridge" "$CONFIG_PATH"
+exec "$SNAP/bin/reduct-bridge-launch" "$CONFIG_PATH"

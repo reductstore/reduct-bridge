@@ -37,16 +37,21 @@ def main() -> None:
     snap_version = resolve_snap_version()
     description = resolve_description()
     indented_description = description.replace("\n", "\n  ")
-    app_extension = ""
+    ros_runtime_part = ""
     if snap_variant == "ros2":
-        app_extension = "    extensions: [ros2-humble]\n"
+        ros_runtime_part = """
+  ros2-runtime:
+    plugin: nil
+    stage-snaps:
+      - ros-humble-ros-base
+"""
 
     template = Path(".github/actions/snap-release/snapcraft.template.yaml").read_text()
     text = template.replace("__SNAP_TITLE__", snap_title)
     text = text.replace("__SNAP_NAME__", snap_name)
     text = text.replace("__SNAP_VERSION__", snap_version)
     text = text.replace("__SNAP_DESCRIPTION__", indented_description)
-    text = text.replace("__APP_EXTENSION__", app_extension)
+    text = text.replace("__ROS_RUNTIME_PART__", ros_runtime_part)
     Path("snap/snapcraft.yaml").write_text(text)
 
 

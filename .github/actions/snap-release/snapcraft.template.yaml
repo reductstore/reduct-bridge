@@ -16,22 +16,18 @@ confinement: strict
 
 apps:
   reduct-bridge:
-    command: bin/reduct-bridge
-__APP_EXTENSION__
+    command: bin/reduct-bridge-launch
     plugs:
       - network
       - network-bind
-      - system-observe
   service:
     command: bin/reduct-bridge-daemon
-__APP_EXTENSION__
     daemon: simple
     install-mode: disable
     restart-condition: on-failure
     plugs:
       - network
       - network-bind
-      - system-observe
 
 parts:
   binary:
@@ -39,11 +35,13 @@ parts:
     source: .snap-build/bin
     organize:
       reduct-bridge: bin/reduct-bridge
+__ROS_RUNTIME_PART__
 
   runtime:
     plugin: dump
     source: snap/local
     organize:
+      run-bridge.sh: bin/reduct-bridge-launch
       start-daemon.sh: bin/reduct-bridge-daemon
       config.toml: etc/reduct-bridge/config.example.toml
 

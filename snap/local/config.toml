@@ -1,17 +1,22 @@
 # Default configuration template copied to $SNAP_COMMON/config.toml on install.
 # Update this file with your own inputs/remotes before enabling the daemon.
 
-[remotes.local]
+[[remotes.reduct]]
+name = "local"
 url = "https://play.reduct.store"
-token = "reductstore"
+token_api = "reductstore"
+bucket = "snap"
+prefix = "bridge/"
 
 [inputs.shell.telemetry]
+repeat_interval = 5
 command = "echo hello"
-interval = "5s"
+entry_name = "telemetry"
+content_type = "text/plain"
 
 [pipelines.default]
 remote = "local"
-inputs = ["shell.telemetry"]
+inputs = ["telemetry"]
 labels = [
   { static = { source = "snap" }, to = "*" }
 ]
