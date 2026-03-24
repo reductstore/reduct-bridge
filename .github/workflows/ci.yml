@@ -442,8 +442,15 @@ jobs:
         variant: [ros1, ros2]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/snap-release
+      - id: snap
+        uses: ./.github/actions/snap-release
         with:
           variant: ${{ matrix.variant }}
-          publish_channel: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge' }}
-          snapcraft_store_credentials: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+      - name: Publish snap package
+        if: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS != '' }}
+        uses: snapcore/action-publish@master
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.snap.outputs.snap_file }}
+          release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge' }}

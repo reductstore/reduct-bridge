@@ -1,19 +1,20 @@
-name: 'Build and Publish Snap Package'
-description: 'Builds reduct-bridge snap variants and publishes them to the Snap Store channels.'
+name: 'Build Snap Package'
+description: 'Builds reduct-bridge snap variants and exposes the built snap file.'
 inputs:
   variant:
     description: 'Build variant track (ros1 or ros2).'
     required: true
-  publish_channel:
-    description: 'Snap channel to publish into (edge or stable).'
-    required: true
-  snapcraft_store_credentials:
-    description: 'Snapcraft store credentials.'
-    required: false
   upload_artifact:
     description: 'Upload built snap as workflow artifact.'
     required: false
     default: 'true'
+outputs:
+  snap_file:
+    description: 'Built snap file path.'
+    value: ${{ steps.rename.outputs.snap_file }}
+  snap_name:
+    description: 'Snap package name.'
+    value: ${{ env.SNAP_NAME }}
 runs:
   using: 'composite'
   steps:
@@ -52,12 +53,6 @@ runs:
         chmod +x .snap-build/bin/reduct-bridge
         chmod +x snap/local/start-daemon.sh
         chmod +x snap/hooks/install
-
-    - name: Install snapcraft
-      shell: bash
-      run: |
-        set -euo pipefail
-        sudo snap install snapcraft --classic
 
     - name: Generate snapcraft manifest
       env:
@@ -99,38 +94,21 @@ runs:
         sed -n '1,240p' snap/snapcraft.yaml
 
     - name: Build snap
-      shell: bash
-      run: |
-        set -euo pipefail
-        mkdir -p snapcraft-logs
-        LOG_FILE="snapcraft-logs/build-${{ inputs.variant }}.log"
-        if ! snapcraft pack --destructive-mode 2>&1 | tee "$LOG_FILE"; then
-          cp -a "$HOME/.local/state/snapcraft/log/." snapcraft-logs/ 2>/dev/null || true
-          exit 1
-        fi
-
-    - name: Lint snap
-      shell: bash
-      run: |
-        set -euo pipefail
-        mkdir -p snapcraft-logs
-        SNAP_FILE=$(ls *.snap)
-        LOG_FILE="snapcraft-logs/lint-${{ inputs.variant }}.log"
-        if ! snapcraft lint "$SNAP_FILE" 2>&1 | tee "$LOG_FILE"; then
-          cp -a "$HOME/.local/state/snapcraft/log/." snapcraft-logs/ 2>/dev/null || true
-          exit 1
-        fi
+      id: build-snap
+      uses: snapcore/action-build@v1
 
     - name: Rename artifact with variant
+      id: rename
       env:
         SNAP_NAME: ${{ env.SNAP_NAME }}
       shell: bash
       run: |
         set -euo pipefail
-        SNAP_FILE=$(ls *.snap)
+        SNAP_FILE="${{ steps.build-snap.outputs.snap }}"
         RENAMED_FILE="${SNAP_NAME}.snap"
         mv "$SNAP_FILE" "$RENAMED_FILE"
         echo "SNAP_FILE=$RENAMED_FILE" >> "$GITHUB_ENV"
+        echo "snap_file=$RENAMED_FILE" >> "$GITHUB_OUTPUT"
 
     - name: Upload artifact
       if: inputs.upload_artifact == 'true'
@@ -138,25 +116,3 @@ runs:
       with:
         name: ${{ env.SNAP_NAME }}.snap
         path: ${{ env.SNAP_FILE }}
-
-    - name: Upload snapcraft logs on failure
-      if: ${{ failure() }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: snapcraft-logs-${{ inputs.variant }}
-        path: snapcraft-logs
-        if-no-files-found: ignore
-
-    - name: Publish to Snap Store
-      shell: bash
-      env:
-        SNAPCRAFT_STORE_CREDENTIALS: ${{ inputs.snapcraft_store_credentials }}
-      run: |
-        set -euo pipefail
-
-        if [ -z "${SNAPCRAFT_STORE_CREDENTIALS:-}" ]; then
-          echo "Snap Store credentials missing; skipping publish"
-          exit 0
-        fi
-
-        snapcraft upload --release="${{ inputs.publish_channel }}" "$SNAP_FILE"
