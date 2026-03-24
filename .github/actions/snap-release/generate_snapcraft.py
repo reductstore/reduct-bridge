@@ -34,17 +34,23 @@ def main() -> None:
     snap_name = os.environ["SNAP_NAME"]
     snap_title = os.environ["SNAP_TITLE"]
     snap_variant = os.environ.get("SNAP_VARIANT", "ros1")
+    snap_ros_distro = os.environ.get("SNAP_ROS_DISTRO", "jazzy").strip().lower()
     snap_version = resolve_snap_version()
     description = resolve_description()
     indented_description = description.replace("\n", "\n  ")
     ros_runtime_part = ""
     if snap_variant == "ros2":
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", snap_ros_distro):
+            raise RuntimeError(
+                f"Unsupported SNAP_ROS_DISTRO value: {snap_ros_distro!r}"
+            )
         ros_runtime_part = """
   ros2-runtime:
     plugin: nil
     stage-snaps:
-      - ros-humble-ros-base
+      - ros-__ROS_DISTRO__-ros-base
 """
+        ros_runtime_part = ros_runtime_part.replace("__ROS_DISTRO__", snap_ros_distro)
 
     template = Path(".github/actions/snap-release/snapcraft.template.yaml").read_text()
     text = template.replace("__SNAP_TITLE__", snap_title)

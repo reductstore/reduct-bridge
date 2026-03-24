@@ -64,19 +64,19 @@ labels = [
 sudo snap install reduct-bridge-<build-type> --channel=edge   # or --channel=stable once released
 ```
 
-To run the service with a config file in your home directory, set the `config-path` snap option:
+To run the service with an explicit config file path, set the `config-path` snap option:
 
    ```bash
-   mkdir -p "$HOME/reduct-bridge"
-   cp path/to/config.toml "$HOME/reduct-bridge/config.toml"
+   sudo mkdir -p /opt/snap/reduct-bridge
+   sudo cp path/to/config.toml /opt/snap/reduct-bridge/reduct-bridge.toml
+   sudo chmod 640 /opt/snap/reduct-bridge/reduct-bridge.toml
 
-   sudo snap set reduct-bridge-<build-type> config-path="$HOME/reduct-bridge/config.toml"
+   sudo snap set reduct-bridge-<build-type> config-path=/opt/snap/reduct-bridge/reduct-bridge.toml
    sudo snap get reduct-bridge-<build-type> config-path
    sudo snap restart reduct-bridge-<build-type>.service
    ```
 
    Notes:
-   - Use a non-hidden home path (for example `~/reduct-bridge/config.toml`, not `~/.config/...`).
    - To switch back to the default path (`/var/snap/<snap-name>/common/config.toml`), run:
 
    ```bash
@@ -87,8 +87,7 @@ To run the service with a config file in your home directory, set the `config-pa
 Snaps auto-refresh by default; switch channels or hold refreshes with `snap refresh`. The service
 can be configured via `snap stop/start <snap-name>.service` after editing the config file.
 
-Release CI builds separate `reduct-bridge-ros1` and `reduct-bridge-ros2` snap packages and
-publishes them to the standard channels.
+Release CI builds snap package variants and publishes them to the standard channels.
 
 ### Cargo / source build
 
@@ -97,36 +96,18 @@ cargo install reduct-bridge
 ```
 
 `cargo install reduct-bridge` builds the default feature set, which includes only the `shell` input.
+For ROS2-specific build and runtime guidance, see [ROS2 input documentation](src/input/ros2/README.md).
 
 To build additional inputs explicitly from source:
 
 ```bash
 cargo build --no-default-features --features ros1
-cargo build --no-default-features --features ros2
 cargo build --no-default-features --features all-inputs
 ```
-
-ROS2 builds require a local ROS2 installation and a sourced environment, for example:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-cargo build --no-default-features --features ros2
-```
-
-For ROS2 builds, the installation must include the standard interface packages required by `rclrs`.
 
 ## Usage
 
 ```bash
-reduct-bridge /path/to/config.toml
-```
-
-For ROS2 inputs, start the bridge from a sourced ROS2 environment and set `ROS_HOME` to a writable directory, especially under `systemd`:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-export ROS_HOME=/var/lib/reduct-bridge/.ros
-mkdir -p "$ROS_HOME"
 reduct-bridge /path/to/config.toml
 ```
 

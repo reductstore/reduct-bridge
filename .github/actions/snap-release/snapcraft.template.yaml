@@ -20,7 +20,6 @@ apps:
     plugs:
       - network
       - network-bind
-      - home
   service:
     command: bin/reduct-bridge-daemon
     daemon: simple
@@ -29,7 +28,6 @@ apps:
     plugs:
       - network
       - network-bind
-      - home
 
 parts:
   binary:

@@ -7,3 +7,6 @@ mkdir -p "$(dirname "$CONFIG_PATH")"
 if [ ! -f "$CONFIG_PATH" ] && [ -f "$DEFAULT_CONFIG" ]; then
   cp "$DEFAULT_CONFIG" "$CONFIG_PATH"
 fi
+
+# Expose default service config path via snap configuration.
+snapctl set config-path="$CONFIG_PATH"

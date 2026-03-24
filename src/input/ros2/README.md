@@ -81,6 +81,8 @@ cargo build --no-default-features --features all-inputs
 - If `schema_paths` is empty, schema lookup falls back to `AMENT_PREFIX_PATH`, `COLCON_PREFIX_PATH`, and `CMAKE_PREFIX_PATH`.
 - For service deployments, set `ROS_HOME` to a writable directory before starting `reduct-bridge`.
 - If you do not set `ROS_HOME`, you must set `HOME` or `ROS_LOG_DIR` instead so ROS2 can initialize its logging directory.
+- For Snap service deployments, if you set `schema_paths` explicitly, use the ROS path staged in the snap runtime: `"/opt/ros/jazzy"`.
+- ROS2 snaps default to `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` to avoid Fast DDS shared-memory transport errors under strict confinement.
 - Example:
 
 ```bash
