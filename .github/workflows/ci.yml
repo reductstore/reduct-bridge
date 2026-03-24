@@ -446,8 +446,17 @@ jobs:
         uses: ./.github/actions/snap-release
         with:
           variant: ${{ matrix.variant }}
+      - name: Check Snapcraft credentials
+        id: snapcraft-creds
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Publish snap package
-        if: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS != '' }}
+        if: ${{ steps.snapcraft-creds.outputs.available == 'true' }}
         uses: snapcore/action-publish@master
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
