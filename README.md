@@ -61,32 +61,27 @@ labels = [
 ### Snap (Ubuntu 22.04+)
 
 ```bash
-sudo snap install reduct-bridge-ros1 --channel=edge   # or --channel=stable once released
-# Or install the ROS2 package instead:
-sudo snap install reduct-bridge-ros2 --channel=edge
+sudo snap install reduct-bridge-<build-type> --channel=edge   # or --channel=stable once released
 ```
 
-The snap ships both the CLI (`reduct-bridge`) and an optional managed service.
-
-1. Copy your configuration into `/var/snap/<snap-name>/common/config.toml` (a template is
-   created automatically on install):
+To run the service with a config file in your home directory, set the `config-path` snap option:
 
    ```bash
-   sudo cp path/to/config.toml /var/snap/reduct-bridge-ros1/common/config.toml
-   sudo chmod 640 /var/snap/reduct-bridge-ros1/common/config.toml
+   mkdir -p "$HOME/reduct-bridge"
+   cp path/to/config.toml "$HOME/reduct-bridge/config.toml"
+
+   sudo snap set reduct-bridge-<build-type> config-path="$HOME/reduct-bridge/config.toml"
+   sudo snap get reduct-bridge-<build-type> config-path
+   sudo snap restart reduct-bridge-<build-type>.service
    ```
 
-2. Run the CLI manually when needed:
+   Notes:
+   - Use a non-hidden home path (for example `~/reduct-bridge/config.toml`, not `~/.config/...`).
+   - To switch back to the default path (`/var/snap/<snap-name>/common/config.toml`), run:
 
    ```bash
-   reduct-bridge /var/snap/reduct-bridge-ros1/common/config.toml
-   ```
-
-3. Or enable the built-in service so it starts on boot and restarts on failure:
-
-   ```bash
-   sudo snap start --enable reduct-bridge-ros1.service
-   sudo snap logs -f reduct-bridge-ros1
+   sudo snap unset reduct-bridge-<build-type> config-path
+   sudo snap restart reduct-bridge-<build-type>.service
    ```
 
 Snaps auto-refresh by default; switch channels or hold refreshes with `snap refresh`. The service

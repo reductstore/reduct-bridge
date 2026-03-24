@@ -20,6 +20,7 @@ apps:
     plugs:
       - network
       - network-bind
+      - home
   service:
     command: bin/reduct-bridge-daemon
     daemon: simple
@@ -28,6 +29,7 @@ apps:
     plugs:
       - network
       - network-bind
+      - home
 
 parts:
   binary:
@@ -49,4 +51,5 @@ __ROS_RUNTIME_PART__
     plugin: dump
     source: snap/hooks
     organize:
+      configure: snap/hooks/configure
       install: snap/hooks/install

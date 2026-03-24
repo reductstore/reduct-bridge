@@ -1,0 +1,26 @@
+#!/bin/bash
+set -euo pipefail
+
+CONFIG_PATH="$(snapctl get config-path 2>/dev/null || true)"
+
+if [ -z "$CONFIG_PATH" ] || [ "$CONFIG_PATH" = "null" ]; then
+  exit 0
+fi
+
+case "$CONFIG_PATH" in
+  /*) ;;
+  *)
+    echo "config-path must be an absolute path, got: '$CONFIG_PATH'" >&2
+    exit 1
+    ;;
+esac
+
+if [ ! -f "$CONFIG_PATH" ]; then
+  echo "configured config-path does not exist: '$CONFIG_PATH'" >&2
+  exit 1
+fi
+
+if [ ! -r "$CONFIG_PATH" ]; then
+  echo "configured config-path is not readable: '$CONFIG_PATH'" >&2
+  exit 1
+fi

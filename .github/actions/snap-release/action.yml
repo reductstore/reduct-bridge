@@ -53,7 +53,9 @@ runs:
       run: |
         set -euo pipefail
         chmod +x .snap-build/bin/reduct-bridge
+        chmod +x snap/local/run-bridge.sh
         chmod +x snap/local/start-daemon.sh
+        chmod +x snap/hooks/configure
         chmod +x snap/hooks/install
 
     - name: Generate snapcraft manifest
