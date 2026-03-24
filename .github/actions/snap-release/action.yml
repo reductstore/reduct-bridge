@@ -61,30 +61,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        python - <<'PY'
-        import os
-        from pathlib import Path
-        import re
-        import textwrap
-
-        readme = Path('README.md').read_text()
-        match = re.search(r'^(ReductBridge bridges .+)$', readme, flags=re.M)
-        if not match:
-          raise SystemExit("Could not find ReductBridge summary line in README.md")
-
-        snap_name = os.environ["SNAP_NAME"]
-        snap_title = os.environ["SNAP_TITLE"]
-        description = match.group(1).strip()
-        summary = textwrap.shorten(description, width=78, placeholder='...')
-        indented_description = description.replace('\n', '\n  ')
-
-        template = Path('.github/actions/snap-release/snapcraft.template.yaml').read_text()
-        text = template.replace('__SNAP_TITLE__', snap_title)
-        text = text.replace('__SNAP_NAME__', snap_name)
-        text = text.replace('__SNAP_SUMMARY__', summary)
-        text = text.replace('__SNAP_DESCRIPTION__', indented_description)
-        Path('snap/snapcraft.yaml').write_text(text)
-        PY
+        python .github/actions/snap-release/generate_snapcraft.py
 
     - name: Print generated snapcraft manifest
       shell: bash

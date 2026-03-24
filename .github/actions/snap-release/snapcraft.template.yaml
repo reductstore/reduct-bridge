@@ -1,8 +1,8 @@
 title: __SNAP_TITLE__
 name: __SNAP_NAME__
 base: core22
-version: git
-summary: __SNAP_SUMMARY__
+version: __SNAP_VERSION__
+summary: ReductBridge bridges live robotics and IIoT data in ReductStore
 description: |
   __SNAP_DESCRIPTION__
 contact: info@reduct.store
