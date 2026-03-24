@@ -5,15 +5,19 @@ from pathlib import Path
 
 
 def resolve_snap_version() -> str:
-    ref_type = os.getenv("GITHUB_REF_TYPE", "")
-    ref_name = os.getenv("GITHUB_REF_NAME", "")
-    sha = os.getenv("GITHUB_SHA", "local")[:7]
-    run_number = os.getenv("GITHUB_RUN_NUMBER", "0")
+    cargo_toml = Path("Cargo.toml").read_text(encoding="utf-8")
+    package_block = re.search(r"(?ms)^\[package\]\n(.*?)(?:^\[|\Z)", cargo_toml)
+    if not package_block:
+        raise RuntimeError("Could not find [package] section in Cargo.toml")
+    version_match = re.search(
+        r'^version\s*=\s*"([^"]+)"\s*$', package_block.group(1), re.M
+    )
+    if not version_match:
+        raise RuntimeError("Could not find package.version in Cargo.toml")
 
-    if ref_type == "tag":
-        version = ref_name[1:] if ref_name.startswith("v") else ref_name
-    else:
-        version = f"0+git.{run_number}.{sha}"
+    crate_version = version_match.group(1).strip()
+    sha = os.getenv("GITHUB_SHA", "local")[:7]
+    version = f"{crate_version}-git{sha}"
     return re.sub(r"[^A-Za-z0-9.+:~-]", "-", version) or "0"
 
 
