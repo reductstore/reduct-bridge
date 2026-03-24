@@ -17,12 +17,14 @@ confinement: strict
 apps:
   reduct-bridge:
     command: bin/reduct-bridge
+__APP_EXTENSION__
     plugs:
       - network
       - network-bind
       - system-observe
   service:
     command: bin/reduct-bridge-daemon
+__APP_EXTENSION__
     daemon: simple
     install-mode: disable
     restart-condition: on-failure

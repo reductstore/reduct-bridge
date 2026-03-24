@@ -28,11 +28,13 @@ runs:
             echo "SNAP_TITLE=ReductBridge for ROS1" >> "$GITHUB_ENV"
             echo "SNAP_NAME=reduct-bridge-ros1" >> "$GITHUB_ENV"
             echo "BINARY_ARTIFACT=bridge-ros1-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
+            echo "SNAP_VARIANT=ros1" >> "$GITHUB_ENV"
             ;;
           ros2)
             echo "SNAP_TITLE=ReductBridge for ROS2" >> "$GITHUB_ENV"
             echo "SNAP_NAME=reduct-bridge-ros2" >> "$GITHUB_ENV"
             echo "BINARY_ARTIFACT=bridge-ros2-humble-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
+            echo "SNAP_VARIANT=ros2" >> "$GITHUB_ENV"
             ;;
           *)
             echo "Unsupported variant: ${{ inputs.variant }}"
@@ -58,6 +60,7 @@ runs:
       env:
         SNAP_NAME: ${{ env.SNAP_NAME }}
         SNAP_TITLE: ${{ env.SNAP_TITLE }}
+        SNAP_VARIANT: ${{ env.SNAP_VARIANT }}
       shell: bash
       run: |
         set -euo pipefail

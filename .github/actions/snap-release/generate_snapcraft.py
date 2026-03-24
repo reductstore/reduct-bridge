@@ -33,15 +33,20 @@ def resolve_description() -> str:
 def main() -> None:
     snap_name = os.environ["SNAP_NAME"]
     snap_title = os.environ["SNAP_TITLE"]
+    snap_variant = os.environ.get("SNAP_VARIANT", "ros1")
     snap_version = resolve_snap_version()
     description = resolve_description()
     indented_description = description.replace("\n", "\n  ")
+    app_extension = ""
+    if snap_variant == "ros2":
+        app_extension = "    extensions: [ros2-humble]\n"
 
     template = Path(".github/actions/snap-release/snapcraft.template.yaml").read_text()
     text = template.replace("__SNAP_TITLE__", snap_title)
     text = text.replace("__SNAP_NAME__", snap_name)
     text = text.replace("__SNAP_VERSION__", snap_version)
     text = text.replace("__SNAP_DESCRIPTION__", indented_description)
+    text = text.replace("__APP_EXTENSION__", app_extension)
     Path("snap/snapcraft.yaml").write_text(text)
 
 
