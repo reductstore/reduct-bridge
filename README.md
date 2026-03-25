@@ -67,25 +67,13 @@ sudo snap install reduct-bridge-<build-type> --channel=edge   # or --channel=sta
 To run the service with an explicit config file path, set the `config-path` snap option:
 
    ```bash
-   sudo mkdir -p /opt/snap/reduct-bridge
-   sudo cp path/to/config.toml /opt/snap/reduct-bridge/reduct-bridge.toml
-   sudo chmod 640 /opt/snap/reduct-bridge/reduct-bridge.toml
+   sudo cp path/to/config.toml /var/snap/reduct-bridge/reduct-bridge.toml
+   sudo chmod 640 /var/snap/reduct-bridge/reduct-bridge.toml
 
-   sudo snap set reduct-bridge-<build-type> config-path=/opt/snap/reduct-bridge/reduct-bridge.toml
+   sudo snap set reduct-bridge-<build-type> config-path=/var/snap/reduct-bridge/commont/reduct-bridge.toml
    sudo snap get reduct-bridge-<build-type> config-path
    sudo snap restart reduct-bridge-<build-type>.service
    ```
-
-   Notes:
-   - To switch back to the default path (`/var/snap/<snap-name>/common/config.toml`), run:
-
-   ```bash
-   sudo snap unset reduct-bridge-<build-type> config-path
-   sudo snap restart reduct-bridge-<build-type>.service
-   ```
-
-Snaps auto-refresh by default; switch channels or hold refreshes with `snap refresh`. The service
-can be configured via `snap stop/start <snap-name>.service` after editing the config file.
 
 Release CI builds snap package variants and publishes them to the standard channels.
 

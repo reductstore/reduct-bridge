@@ -15,7 +15,7 @@ grade: stable
 confinement: strict
 
 apps:
-  reduct-bridge:
+  bin:
     command: bin/reduct-bridge-launch
     plugs:
       - network
@@ -23,7 +23,6 @@ apps:
   service:
     command: bin/reduct-bridge-daemon
     daemon: simple
-    install-mode: disable
     restart-condition: on-failure
     plugs:
       - network
