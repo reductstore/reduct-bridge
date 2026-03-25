@@ -35,11 +35,14 @@ def main() -> None:
     snap_title = os.environ["SNAP_TITLE"]
     snap_variant = os.environ.get("SNAP_VARIANT", "ros1")
     snap_ros_distro = os.environ.get("SNAP_ROS_DISTRO", "jazzy").strip().lower()
+    snap_base = "core22"
     snap_version = resolve_snap_version()
     description = resolve_description()
     indented_description = description.replace("\n", "\n  ")
     ros_runtime_part = ""
     if snap_variant == "ros2":
+        # ROS2 Jazzy runtime is built on Ubuntu 24.04 and requires core24 ABI.
+        snap_base = "core24"
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", snap_ros_distro):
             raise RuntimeError(
                 f"Unsupported SNAP_ROS_DISTRO value: {snap_ros_distro!r}"
@@ -55,6 +58,7 @@ def main() -> None:
     template = Path(".github/actions/snap-release/snapcraft.template.yaml").read_text()
     text = template.replace("__SNAP_TITLE__", snap_title)
     text = text.replace("__SNAP_NAME__", snap_name)
+    text = text.replace("__SNAP_BASE__", snap_base)
     text = text.replace("__SNAP_VERSION__", snap_version)
     text = text.replace("__SNAP_DESCRIPTION__", indented_description)
     text = text.replace("__ROS_RUNTIME_PART__", ros_runtime_part)
