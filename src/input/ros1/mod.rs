@@ -300,8 +300,6 @@ impl InputLauncher for Ros1Instance {
             bail!("ROS input must define at least one topic in 'topics'");
         }
 
-        Self::try_init_ros(&cfg.node_name, &cfg.uri)?;
-
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
 
         info!(
@@ -322,55 +320,67 @@ impl InputLauncher for Ros1Instance {
             }
         }
 
-        let resolved_topics = wildcard::resolve_topics_for_subscription(&cfg.topics)?;
-        if resolved_topics.is_empty() {
-            warn!(
-                "ROS input '{}' has no resolved topics to subscribe after wildcard expansion",
-                cfg.node_name
-            );
-        }
+        let subscribers = tokio::task::spawn_blocking({
+            let cfg = cfg.clone();
+            let pipeline_tx = pipeline_tx.clone();
+            move || -> Result<Vec<rosrust::Subscriber>, Error> {
+                Self::try_init_ros(&cfg.node_name, &cfg.uri)?;
 
-        let mut subscribers = Vec::new();
-        for topic_cfg in resolved_topics {
-            let topic_name = topic_cfg.name.clone();
-            let entry_name = topic_cfg
-                .entry_name
-                .clone()
-                .unwrap_or_else(|| topic_name.clone());
-            let needs_dynamic_labels = Self::has_dynamic_labels(&topic_cfg.labels);
-            let runtime = Arc::new(TopicRuntime {
-                topic_cfg: topic_cfg.clone(),
-                topic_name: topic_name.clone(),
-                entry_name,
-                needs_dynamic_labels,
-                decoders: Arc::new(Mutex::new(HashMap::new())),
-                pipeline_tx: pipeline_tx.clone(),
-            });
+                let resolved_topics = wildcard::resolve_topics_for_subscription(&cfg.topics)?;
+                if resolved_topics.is_empty() {
+                    warn!(
+                        "ROS input '{}' has no resolved topics to subscribe after wildcard expansion",
+                        cfg.node_name
+                    );
+                }
 
-            let on_message_runtime = Arc::clone(&runtime);
-            let on_connect_runtime = Arc::clone(&runtime);
+                let mut subscribers = Vec::new();
+                for topic_cfg in resolved_topics {
+                    let topic_name = topic_cfg.name.clone();
+                    let entry_name = topic_cfg
+                        .entry_name
+                        .clone()
+                        .unwrap_or_else(|| topic_name.clone());
+                    let needs_dynamic_labels = Self::has_dynamic_labels(&topic_cfg.labels);
+                    let runtime = Arc::new(TopicRuntime {
+                        topic_cfg: topic_cfg.clone(),
+                        topic_name: topic_name.clone(),
+                        entry_name,
+                        needs_dynamic_labels,
+                        decoders: Arc::new(Mutex::new(HashMap::new())),
+                        pipeline_tx: pipeline_tx.clone(),
+                    });
 
-            let subscriber = rosrust::subscribe_with_ids_and_headers::<RawMessage, _, _>(
-                &topic_name,
-                cfg.queue_size,
-                move |raw: RawMessage, publisher_id: &str| {
-                    on_message_runtime.handle_message(raw, publisher_id);
-                },
-                move |headers: HashMap<String, String>| {
-                    on_connect_runtime.handle_connect(headers);
-                },
-            )
-            .map_err(|err| {
-                anyhow!(
-                    "Failed to subscribe to ROS topic '{}' for node '{}': {}",
-                    topic_name,
-                    cfg.node_name,
-                    err
-                )
-            })?;
+                    let on_message_runtime = Arc::clone(&runtime);
+                    let on_connect_runtime = Arc::clone(&runtime);
 
-            subscribers.push(subscriber);
-        }
+                    let subscriber = rosrust::subscribe_with_ids_and_headers::<RawMessage, _, _>(
+                        &topic_name,
+                        cfg.queue_size,
+                        move |raw: RawMessage, publisher_id: &str| {
+                            on_message_runtime.handle_message(raw, publisher_id);
+                        },
+                        move |headers: HashMap<String, String>| {
+                            on_connect_runtime.handle_connect(headers);
+                        },
+                    )
+                    .map_err(|err| {
+                        anyhow!(
+                            "Failed to subscribe to ROS topic '{}' for node '{}': {}",
+                            topic_name,
+                            cfg.node_name,
+                            err
+                        )
+                    })?;
+
+                    subscribers.push(subscriber);
+                }
+
+                Ok(subscribers)
+            }
+        })
+        .await
+        .map_err(|err| anyhow!("ROS startup worker task for '{}' failed: {}", cfg.node_name, err))??;
 
         tokio::spawn(async move {
             debug!("ROS worker task started for {}", cfg.node_name);
