@@ -7,7 +7,7 @@ use anyhow::{Error, anyhow, bail};
 use log::{info, warn};
 use rclrs::{
     Context as Ros2Context, CreateBasicExecutor, InitOptions, MessageInfo, MessageTypeName,
-    QoSProfile, SpinOptions, SubscriptionOptions,
+    QoSProfile, SerializedMessage, SpinOptions, SubscriptionOptions,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -556,13 +556,6 @@ impl Ros2Instance {
                             &pipeline_tx,
                         )?;
 
-                        let callback = {
-                            let runtime = runtime.clone();
-                            move |payload: Vec<u8>, info: MessageInfo| {
-                                runtime.handle_payload(payload, Self::message_info_timestamp_us(&info));
-                            }
-                        };
-
                         let mut options = SubscriptionOptions::new(topic_cfg.name.as_str());
                         options.qos = QoSProfile::default().keep_last(worker_cfg.queue_size as u32);
 
@@ -570,7 +563,6 @@ impl Ros2Instance {
                             .create_serialized_subscription(
                                 MessageTypeName::try_from(topic_type.as_str())?,
                                 options,
-                                callback,
                             )
                             .map_err(|err| {
                                 anyhow!(
@@ -581,7 +573,16 @@ impl Ros2Instance {
                                 )
                             })?;
 
-                        subscriptions.push(subscription);
+                        let msg_buf = SerializedMessage::new(4096).map_err(|err| {
+                            anyhow!(
+                                "Failed to allocate serialized buffer for topic '{}' [{}]: {}",
+                                topic_cfg.name,
+                                topic_type,
+                                err
+                            )
+                        })?;
+
+                        subscriptions.push((subscription, runtime, msg_buf));
                     }
 
                     let _ = ready_tx.send(Ok(()));
@@ -592,6 +593,32 @@ impl Ros2Instance {
                         for err in errors {
                             if !err.is_timeout() {
                                 warn!("ROS2 executor error in '{}': {}", worker_cfg.node_name, err);
+                            }
+                        }
+
+                        for (subscription, runtime, msg_buf) in &mut subscriptions {
+                            loop {
+                                match subscription.take(msg_buf) {
+                                    Ok(Some(info)) => {
+                                        runtime.handle_payload(
+                                            msg_buf.as_bytes().to_vec(),
+                                            Self::message_info_timestamp_us(&info),
+                                        );
+                                        msg_buf.clear();
+                                    }
+                                    Ok(None) => {
+                                        msg_buf.clear();
+                                        break;
+                                    }
+                                    Err(err) => {
+                                        warn!(
+                                            "Failed to take serialized ROS2 message in '{}': {}",
+                                            worker_cfg.node_name, err
+                                        );
+                                        msg_buf.clear();
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }

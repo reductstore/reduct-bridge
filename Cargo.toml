@@ -26,7 +26,7 @@ env_logger = "0.11.8"
 regex = "1.12.2"
 serde_json = "1.0.145"
 rosrust = { version = "0.9.13", optional = true, git = "https://github.com/reductstore/rosrust.git", tag = "v0.9.13" }
-rclrs = { git = "https://github.com/reductstore/ros2_rust", optional = true , version = "0.7.0"}
+rclrs = { git = "https://github.com/ros2-rust/ros2_rust.git", rev = "475eab2ffa20ccdb1ac9ef2e191ea9965d390f94", optional = true, version = "0.7.0" }
 ros2_message = { git = "https://github.com/reductstore/ros2_message", optional = true, version = "0.1.1" }
 
 

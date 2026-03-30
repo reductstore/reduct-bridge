@@ -728,7 +728,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1878,7 +1878,7 @@ dependencies = [
 [[package]]
 name = "rclrs"
 version = "0.7.0"
-source = "git+https://github.com/reductstore/ros2_rust#b73073f497d0570e2e9b99206a9f97eefc54714d"
+source = "git+https://github.com/ros2-rust/ros2_rust.git?rev=475eab2ffa20ccdb1ac9ef2e191ea9965d390f94#475eab2ffa20ccdb1ac9ef2e191ea9965d390f94"
 dependencies = [
  "ament_rs",
  "async-std",
@@ -2233,7 +2233,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2291,7 +2291,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3140,7 +3140,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
