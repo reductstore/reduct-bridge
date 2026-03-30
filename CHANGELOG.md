@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.1.2 - 2026-03-30
+
 ### Added
 
 - Official Snap packaging, ROS1/ROS2 variant build matrix, CI publish workflow, and README installation docs, [PR-12](https://github.com/reductstore/reduct-bridge/pull/12)
