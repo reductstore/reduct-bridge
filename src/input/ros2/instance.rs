@@ -318,12 +318,14 @@ impl Ros2Instance {
                 let Some(package) = parts.next() else {
                     continue;
                 };
-                let Some(type_name) = parts.next() else {
+                let Some(second) = parts.next() else {
                     continue;
                 };
-                if parts.next().is_some() {
-                    continue;
-                }
+                let type_name = match (second, parts.next(), parts.next()) {
+                    ("msg", Some(type_name), None) => type_name,
+                    (type_name, None, None) => type_name,
+                    _ => continue,
+                };
                 format!("{package}/msg/{type_name}")
             } else {
                 format!("{package}/msg/{base_type}")
