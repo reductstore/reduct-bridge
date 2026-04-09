@@ -65,6 +65,25 @@ fn default_entry_prefix() -> String {
     "/metrics".to_string()
 }
 
+fn build_metric_payload(kind: &MetricKind, timestamp_us: u64) -> serde_json::Value {
+    match kind {
+        MetricKind::Cpu => json!({
+            "timestamp_us": timestamp_us,
+            "usage_percent": 42.5
+        }),
+        MetricKind::Memory => json!({
+            "timestamp_us": timestamp_us,
+            "used_bytes": 8_000_000_000u64,
+            "total_bytes": 16_000_000_000u64,
+        }),
+        MetricKind::Disk => json!({
+            "timestamp_us": timestamp_us,
+            "total_bytes": 512_000_000_000u64,
+            "available_bytes": 256_000_000_000u64,
+        }),
+    }
+}
+
 #[async_trait]
 impl InputLauncher for MetricsInstance {
     async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<Sender<Message>, Error> {
@@ -118,6 +137,7 @@ impl InputLauncher for MetricsInstance {
                             cfg.entry_prefix,
                             selected_metrics
                         );
+
                     }
                 }
             }
