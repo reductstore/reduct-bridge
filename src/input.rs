@@ -80,7 +80,7 @@ impl InputBuilder {
                 let input_cfg: metrics::MetricsConfig = parse_entry(input_table)?;
                 debug!("Creating metrics launcher for input '{}'", input_name);
                 let launcher = metrics::MetricsInstance::new(input_cfg);
-                launcher.launch(pipeline_ts).await
+                launcher.launch(pipeline_tx).await
             }
             _ => bail!(
                 "Unsupported input type '{}' for input '{}'",
