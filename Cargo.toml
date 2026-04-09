@@ -6,27 +6,34 @@ edition = "2024"
 
 [features]
 default = ["shell"]
-all-inputs = ["shell", "ros1", "ros2"]
+all-inputs = ["shell", "ros1", "ros2", "metrics"]
 ros1 = ["dep:rosrust"]
 ros2 = ["dep:rclrs", "dep:ros2_message"]
 shell = []
+metrics = []
 ci = []
 
 
 [dependencies]
-tokio = { version = "1.49.0", features = ["macros", "rt", "signal", "sync", "time"] }
+tokio = { version = "1.49.0", features = [
+  "macros",
+  "rt",
+  "signal",
+  "sync",
+  "time",
+] }
 async-trait = "0.1.89"
 toml = "1.0.3"
 serde = { version = "1.0.228", features = ["derive"] }
 bytes = "1.11.1"
-reduct-rs = { git="https://github.com/reductstore/reduct-rs.git", version = "1.19.0" }
+reduct-rs = { git = "https://github.com/reductstore/reduct-rs.git", version = "1.19.0" }
 anyhow = "1.0.102"
 log = "0.4.28"
 env_logger = "0.11.8"
 regex = "1.12.2"
 serde_json = "1.0.145"
 rosrust = { version = "0.9.13", optional = true, git = "https://github.com/reductstore/rosrust.git", tag = "v0.9.13" }
-rclrs = { git = "https://github.com/reductstore/ros2_rust", optional = true , version = "0.7.0"}
+rclrs = { git = "https://github.com/reductstore/ros2_rust", optional = true, version = "0.7.0" }
 ros2_message = { git = "https://github.com/reductstore/ros2_message", optional = true, version = "0.1.1" }
 
 
