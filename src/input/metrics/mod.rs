@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::formats::json::{extract_json_path, value_to_label};
 use crate::input::InputLauncher;
-use crate::message::Message;
+use crate::message::{Message, Record};
 use anyhow::{Error, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
 use serde::Deserialize;
+use serde_json::json;
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+use sysinfo::{Disks, System};
 use tokio::sync::mpsc::{Sender, channel};
 use tokio::time::{Duration, interval};
 
@@ -50,6 +54,26 @@ pub enum MetricKind {
     Disk,
 }
 
+#[derive(Debug)]
+struct MetricSources {
+    system: System,
+    disks: Disks,
+}
+
+impl MetricSources {
+    fn new() -> Self {
+        Self {
+            system: System::new_all(),
+            disks: Disks::new_with_refreshed_list(),
+        }
+    }
+
+    fn refresh(&mut self) {
+        self.system.refresh_cpu_all();
+        self.system.refresh_memory();
+        self.disks.refresh(true);
+    }
+}
 #[derive(Debug, Deserialize, Clone)]
 pub struct MetricsInstance {
     pub cfg: MetricsConfig,
@@ -65,23 +89,107 @@ fn default_entry_prefix() -> String {
     "/metrics".to_string()
 }
 
-fn build_metric_payload(kind: &MetricKind, timestamp_us: u64) -> serde_json::Value {
+fn build_cpu_payload(system: &System, timestamp_us: u64) -> serde_json::Value {
+    json!({
+        "timestamp_us": timestamp_us,
+        "cpu_usage_percent": system.global_cpu_usage(),
+    })
+}
+
+fn build_memory_payload(system: &System, timestamp_us: u64) -> serde_json::Value {
+    json!({
+        "timestamp_us": timestamp_us,
+        "memory_used_bytes": system.used_memory(),
+        "memory_total_bytes": system.total_memory(),
+    })
+}
+
+fn build_disk_payload(disks: &Disks, timestamp_us: u64) -> serde_json::Value {
+    let disk_info: Vec<_> = disks
+        .iter()
+        .map(|disk| {
+            json!({
+                "name": disk.name().to_string_lossy(),
+                "mount_point": disk.mount_point().to_string_lossy(),
+                "total_bytes": disk.total_space(),
+                "available_bytes": disk.available_space(),
+            })
+        })
+        .collect();
+
+    json!({
+        "timestamp_us": timestamp_us,
+        "disks": disk_info,
+    })
+}
+
+fn build_metric_payload(
+    kind: &MetricKind,
+    sources: &MetricSources,
+    timestamp_us: u64,
+) -> serde_json::Value {
     match kind {
-        MetricKind::Cpu => json!({
-            "timestamp_us": timestamp_us,
-            "usage_percent": 42.5
-        }),
-        MetricKind::Memory => json!({
-            "timestamp_us": timestamp_us,
-            "used_bytes": 8_000_000_000u64,
-            "total_bytes": 16_000_000_000u64,
-        }),
-        MetricKind::Disk => json!({
-            "timestamp_us": timestamp_us,
-            "total_bytes": 512_000_000_000u64,
-            "available_bytes": 256_000_000_000u64,
-        }),
+        MetricKind::Cpu => build_cpu_payload(&sources.system, timestamp_us),
+        MetricKind::Memory => build_memory_payload(&sources.system, timestamp_us),
+        MetricKind::Disk => build_disk_payload(&sources.disks, timestamp_us),
     }
+}
+
+fn current_timestamp_us() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64
+}
+
+fn metric_name(kind: &MetricKind) -> &'static str {
+    match kind {
+        MetricKind::Cpu => "cpu",
+        MetricKind::Memory => "memory",
+        MetricKind::Disk => "disk",
+    }
+}
+
+fn build_labels(
+    rules: &[MetricsLabelRule],
+    payload: &serde_json::Value,
+) -> HashMap<String, String> {
+    let mut labels = HashMap::new();
+    for rule in rules {
+        match rule {
+            MetricsLabelRule::Static { r#static } => {
+                labels.extend(r#static.clone());
+            }
+            MetricsLabelRule::Field { field, label } => {
+                if let Some(value) = extract_json_path(payload, field) {
+                    labels.insert(label.clone(), value_to_label(value));
+                }
+            }
+        }
+    }
+    labels
+}
+
+fn build_record(
+    cfg: &MetricsConfig,
+    kind: &MetricKind,
+    payload: &serde_json::Value,
+    timestamp_us: u64,
+) -> Result<Record, Error> {
+    let labels = build_labels(&cfg.labels, payload);
+    let content = serde_json::to_vec(payload)?;
+
+    Ok(Record {
+        timestamp_us,
+        entry_name: format!(
+            "{}/{}",
+            cfg.entry_prefix.trim_end_matches('/'),
+            metric_name(kind)
+        ),
+        content: content.into(),
+        content_type: Some("application/json".to_string()),
+        labels,
+    })
 }
 
 #[async_trait]
@@ -110,6 +218,7 @@ impl InputLauncher for MetricsInstance {
         tokio::spawn(async move {
             debug!("Metrics worker task started");
             let mut ticker = interval(Duration::from_secs(cfg.repeat_interval));
+            let mut sources = MetricSources::new();
 
             loop {
                 tokio::select! {
@@ -137,7 +246,22 @@ impl InputLauncher for MetricsInstance {
                             cfg.entry_prefix,
                             selected_metrics
                         );
+                        sources.refresh();
+                        for kind in &selected_metrics {
+                            let timestamp_us = current_timestamp_us();
+                            let payload = build_metric_payload(kind, &sources, timestamp_us);
 
+                            match build_record(&cfg, kind, &payload, timestamp_us) {
+                                Ok(record) => {
+                                    if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
+                                        warn!("Failed to forward metrics record to pipeline: {}", err);
+                                    }
+                                }
+                                Err(err) => {
+                                    warn!("Failed to build metrics record for {:?}: {}", kind, err);
+                                }
+                            }
+                        }
                     }
                 }
             }
