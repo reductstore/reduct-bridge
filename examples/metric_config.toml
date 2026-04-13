@@ -1,0 +1,29 @@
+# ReductStore remote destination.
+[[remotes.reduct]]
+# Unique remote name referenced by pipelines.<name>.remote.
+name = "local"
+# ReductStore base URL.
+url = "http://localhost:8383"
+# API token used for authentication.
+token_api = "***"
+# Target bucket for all records from this remote.
+bucket = "my-bucket"
+# Required key prefix inside the bucket.
+prefix = ""
+
+
+# List of subscribed topics for this input.
+[inputs.metrics.metrics_all]
+repeat_interval = 1
+labels = [
+    { field = "user_percent", label = "user_percent" },
+]
+
+
+[pipelines.metrics_pipeline]
+remote = "local"
+inputs = ["metrics_all"]
+# Optional pipeline-level label routing rules.
+labels = [
+    { from = "/metrics/cpu", labels = ["user_percent"], to = "*" }
+]
