@@ -22,7 +22,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use sysinfo::{Disks, System};
+use systemstat::{Platform, System};
 use tokio::sync::mpsc::{Sender, channel};
 use tokio::time::{Duration, interval};
 
@@ -54,26 +54,6 @@ pub enum MetricKind {
     Disk,
 }
 
-#[derive(Debug)]
-struct MetricSources {
-    system: System,
-    disks: Disks,
-}
-
-impl MetricSources {
-    fn new() -> Self {
-        Self {
-            system: System::new_all(),
-            disks: Disks::new_with_refreshed_list(),
-        }
-    }
-
-    fn refresh(&mut self) {
-        self.system.refresh_cpu_all();
-        self.system.refresh_memory();
-        self.disks.refresh(true);
-    }
-}
 #[derive(Debug, Deserialize, Clone)]
 pub struct MetricsInstance {
     pub cfg: MetricsConfig,
@@ -89,49 +69,63 @@ fn default_entry_prefix() -> String {
     "/metrics".to_string()
 }
 
-fn build_cpu_payload(system: &System, timestamp_us: u64) -> serde_json::Value {
-    json!({
+fn build_cpu_payload(system: &System, timestamp_us: u64) -> Option<serde_json::Value> {
+    let cpu = system.cpu_load_aggregate().ok()?;
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let done = cpu.done().ok()?;
+
+    Some(json!({
         "timestamp_us": timestamp_us,
-        "cpu_usage_percent": system.global_cpu_usage(),
-    })
+        "user_percent": done.user * 100.0,
+        "system_percent": done.system * 100.0,
+        "idle_percent": done.idle * 100.0,
+    }))
 }
 
-fn build_memory_payload(system: &System, timestamp_us: u64) -> serde_json::Value {
-    json!({
-        "timestamp_us": timestamp_us,
-        "memory_used_bytes": system.used_memory(),
-        "memory_total_bytes": system.total_memory(),
-    })
+fn build_memory_payload(system: &System, timestamp_us: u64) -> Option<serde_json::Value> {
+    match system.memory() {
+        Ok(mem) => Some(json!({
+            "timestamp_us": timestamp_us,
+            "total_bytes": mem.total.as_u64(),
+            "free_bytes": mem.free.as_u64(),
+        })),
+        Err(_) => None,
+    }
 }
 
-fn build_disk_payload(disks: &Disks, timestamp_us: u64) -> serde_json::Value {
-    let disk_info: Vec<_> = disks
-        .iter()
-        .map(|disk| {
-            json!({
-                "name": disk.name().to_string_lossy(),
-                "mount_point": disk.mount_point().to_string_lossy(),
-                "total_bytes": disk.total_space(),
-                "available_bytes": disk.available_space(),
-            })
-        })
-        .collect();
+fn build_disk_payload(system: &System, timestamp_us: u64) -> Option<serde_json::Value> {
+    match system.mounts() {
+        Ok(mounts) => {
+            let items: Vec<_> = mounts
+                .into_iter()
+                .map(|mount| {
+                    json!({
+                        "fs_mounted_on": mount.fs_mounted_on,
+                        "fs_type": mount.fs_type,
+                        "total_bytes": mount.total.as_u64(),
+                        "available_bytes": mount.avail.as_u64(),
+                    })
+                })
+                .collect();
 
-    json!({
-        "timestamp_us": timestamp_us,
-        "disks": disk_info,
-    })
+            Some(json!({
+                "timestamp_us": timestamp_us,
+                "disks": items,
+            }))
+        }
+        Err(_) => None,
+    }
 }
 
 fn build_metric_payload(
     kind: &MetricKind,
-    sources: &MetricSources,
+    system: &System,
     timestamp_us: u64,
-) -> serde_json::Value {
+) -> Option<serde_json::Value> {
     match kind {
-        MetricKind::Cpu => build_cpu_payload(&sources.system, timestamp_us),
-        MetricKind::Memory => build_memory_payload(&sources.system, timestamp_us),
-        MetricKind::Disk => build_disk_payload(&sources.disks, timestamp_us),
+        MetricKind::Cpu => build_cpu_payload(system, timestamp_us),
+        MetricKind::Memory => build_memory_payload(system, timestamp_us),
+        MetricKind::Disk => build_disk_payload(system, timestamp_us),
     }
 }
 
@@ -218,7 +212,7 @@ impl InputLauncher for MetricsInstance {
         tokio::spawn(async move {
             debug!("Metrics worker task started");
             let mut ticker = interval(Duration::from_secs(cfg.repeat_interval));
-            let mut sources = MetricSources::new();
+            let system = System::new();
 
             loop {
                 tokio::select! {
@@ -246,10 +240,13 @@ impl InputLauncher for MetricsInstance {
                             cfg.entry_prefix,
                             selected_metrics
                         );
-                        sources.refresh();
                         for kind in &selected_metrics {
                             let timestamp_us = current_timestamp_us();
-                            let payload = build_metric_payload(kind, &sources, timestamp_us);
+
+                            let Some(payload) = build_metric_payload(kind, &system, timestamp_us) else {
+                                warn!("Failed to collect {:?} metrics, skipping this tick", kind);
+                                continue;
+                            };
 
                             match build_record(&cfg, kind, &payload, timestamp_us) {
                                 Ok(record) => {
