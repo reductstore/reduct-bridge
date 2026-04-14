@@ -70,7 +70,7 @@ impl MetricsInstance {
 }
 
 fn default_entry_prefix() -> String {
-    "/metrics".to_string()
+    "metrics".to_string()
 }
 
 fn default_ignore_fs() -> Vec<String> {
@@ -101,9 +101,21 @@ fn default_ignore_fs() -> Vec<String> {
 }
 
 fn build_cpu_payload(system: &System, timestamp_us: u64) -> Option<serde_json::Value> {
-    let cpu = system.cpu_load_aggregate().ok()?;
+    let cpu = match system.cpu_load_aggregate() {
+        Ok(cpu) => cpu,
+        Err(err) => {
+            warn!("Failed to start CPU aggregate measurement: {}", err);
+            return None;
+        }
+    };
     std::thread::sleep(std::time::Duration::from_secs(1));
-    let done = cpu.done().ok()?;
+    let done = match cpu.done() {
+        Ok(done) => done,
+        Err(err) => {
+            warn!("Failed to finish CPU aggregate measurement: {}", err);
+            return None;
+        }
+    };
 
     Some(json!({
         "timestamp_us": timestamp_us,
@@ -243,11 +255,7 @@ fn build_record(
 
     Ok(Record {
         timestamp_us,
-        entry_name: format!(
-            "{}/{}",
-            cfg.entry_prefix.trim_end_matches('/'),
-            metric_name(kind)
-        ),
+        entry_name: format!("{}-{}", cfg.entry_prefix.trim_matches('/'), metric_name(kind)),
         content: content.into(),
         content_type: Some("application/json".to_string()),
         labels,
@@ -355,7 +363,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(cfg.repeat_interval, 5);
-        assert_eq!(cfg.entry_prefix, "/metrics");
+        assert_eq!(cfg.entry_prefix, "metrics");
         assert!(cfg.metrics.is_empty());
         assert!(cfg.mount_points.is_empty());
         assert!(!cfg.ignore_fs.is_empty());
@@ -439,7 +447,7 @@ mod tests {
         let record = build_record(&cfg, &MetricKind::Cpu, &payload, 42).unwrap();
 
         assert_eq!(record.timestamp_us, 42);
-        assert_eq!(record.entry_name, "/metrics/cpu");
+        assert_eq!(record.entry_name, "metrics-cpu");
         assert_eq!(record.content_type, Some("application/json".to_string()));
         assert_eq!(record.labels.get("source"), Some(&"metrics".to_string()));
     }
@@ -511,7 +519,7 @@ mod tests {
 
         match message {
             Message::Data(record) => {
-                assert_eq!(record.entry_name, "/metrics/memory");
+                assert_eq!(record.entry_name, "metrics-memory");
                 assert_eq!(record.content_type, Some("application/json".to_string()));
             }
             other => panic!("expected data message, got {other:?}"),
@@ -535,7 +543,7 @@ mod tests {
 
         assert_eq!(cfg.repeat_interval, 1);
         assert!(cfg.metrics.is_empty());
-        assert_eq!(cfg.entry_prefix, "/metrics");
+        assert_eq!(cfg.entry_prefix, "metrics");
         assert_eq!(cfg.labels.len(), 1);
     }
 }

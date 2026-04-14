@@ -11,10 +11,18 @@ bucket = "my-bucket"
 # Required key prefix inside the bucket.
 prefix = ""
 
-
-# List of subscribed topics for this input.
+# Metrics input configuration.
+# Structure: [inputs.metrics.<input_name>]
 [inputs.metrics.metrics_all]
+# Repeat metric collection every N seconds.
 repeat_interval = 1
+# Optional: records are written as metrics-cpu, metrics-memory, metrics-disk by default.
+# entry_prefix = "metrics"
+# Optional: collect all supported metrics if omitted.
+# metrics = ["cpu", "memory", "disk"]
+# Optional disk filters:
+# mount_points = ["/"]
+# ignore_fs = ["tmpfs", "devtmpfs", "proc", "sysfs", "squashfs"]
 labels = [
     { field = "user_percent", label = "user_percent" },
 ]
@@ -25,5 +33,5 @@ remote = "local"
 inputs = ["metrics_all"]
 # Optional pipeline-level label routing rules.
 labels = [
-    { from = "/metrics/cpu", labels = ["user_percent"], to = "*" }
+    { from = "metrics-cpu", labels = ["user_percent"], to = "*" }
 ]
