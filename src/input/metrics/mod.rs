@@ -255,7 +255,11 @@ fn build_record(
 
     Ok(Record {
         timestamp_us,
-        entry_name: format!("{}-{}", cfg.entry_prefix.trim_matches('/'), metric_name(kind)),
+        entry_name: format!(
+            "{}-{}",
+            cfg.entry_prefix.trim_matches('/'),
+            metric_name(kind)
+        ),
         content: content.into(),
         content_type: Some("application/json".to_string()),
         labels,
