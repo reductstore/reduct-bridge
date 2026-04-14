@@ -150,7 +150,12 @@ fn build_disk_payload(
             let items: Vec<_> = mounts
                 .into_iter()
                 .filter(|mount| {
-                    include_mount(cfg, &mount.fs_mounted_on, &mount.fs_type, mount.total.as_u64())
+                    include_mount(
+                        cfg,
+                        &mount.fs_mounted_on,
+                        &mount.fs_type,
+                        mount.total.as_u64(),
+                    )
                 })
                 .map(|mount| {
                     json!({
@@ -330,8 +335,8 @@ impl InputLauncher for MetricsInstance {
 #[cfg(test)]
 mod tests {
     use super::{
-        MetricKind, MetricsConfig, MetricsLabelRule, build_labels, build_record, include_mount,
-        selected_metrics, MetricsInstance,
+        MetricKind, MetricsConfig, MetricsInstance, MetricsLabelRule, build_labels, build_record,
+        include_mount, selected_metrics,
     };
     use crate::input::InputLauncher;
     use crate::message::Message;
@@ -382,7 +387,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(selected_metrics(&cfg), vec![MetricKind::Cpu, MetricKind::Disk]);
+        assert_eq!(
+            selected_metrics(&cfg),
+            vec![MetricKind::Cpu, MetricKind::Disk]
+        );
     }
 
     #[test]
@@ -504,10 +512,7 @@ mod tests {
         match message {
             Message::Data(record) => {
                 assert_eq!(record.entry_name, "/metrics/memory");
-                assert_eq!(
-                    record.content_type,
-                    Some("application/json".to_string())
-                );
+                assert_eq!(record.content_type, Some("application/json".to_string()));
             }
             other => panic!("expected data message, got {other:?}"),
         }
