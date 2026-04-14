@@ -36,6 +36,10 @@ pub struct MetricsConfig {
     #[serde(default = "default_entry_prefix")]
     pub entry_prefix: String,
     #[serde(default)]
+    pub mount_points: Vec<String>,
+    #[serde(default = "default_ignore_fs")]
+    pub ignore_fs: Vec<String>,
+    #[serde(default)]
     pub labels: Vec<MetricsLabelRule>,
 }
 
@@ -46,7 +50,7 @@ pub enum MetricsLabelRule {
     Field { field: String, label: String },
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum MetricKind {
     Cpu,
@@ -67,6 +71,33 @@ impl MetricsInstance {
 
 fn default_entry_prefix() -> String {
     "/metrics".to_string()
+}
+
+fn default_ignore_fs() -> Vec<String> {
+    vec![
+        "autofs".to_string(),
+        "tmpfs".to_string(),
+        "proc".to_string(),
+        "sysfs".to_string(),
+        "devpts".to_string(),
+        "devtmpfs".to_string(),
+        "devfs".to_string(),
+        "efivarfs".to_string(),
+        "securityfs".to_string(),
+        "cgroup2".to_string(),
+        "pstore".to_string(),
+        "bpf".to_string(),
+        "hugetlbfs".to_string(),
+        "mqueue".to_string(),
+        "debugfs".to_string(),
+        "tracefs".to_string(),
+        "configfs".to_string(),
+        "fusectl".to_string(),
+        "iso9660".to_string(),
+        "overlay".to_string(),
+        "aufs".to_string(),
+        "squashfs".to_string(),
+    ]
 }
 
 fn build_cpu_payload(system: &System, timestamp_us: u64) -> Option<serde_json::Value> {
@@ -93,11 +124,34 @@ fn build_memory_payload(system: &System, timestamp_us: u64) -> Option<serde_json
     }
 }
 
-fn build_disk_payload(system: &System, timestamp_us: u64) -> Option<serde_json::Value> {
+fn include_mount(cfg: &MetricsConfig, mounted_on: &str, fs_type: &str, total_bytes: u64) -> bool {
+    if total_bytes == 0 {
+        return false;
+    }
+
+    if cfg.ignore_fs.iter().any(|ignored| ignored == fs_type) {
+        return false;
+    }
+
+    if cfg.mount_points.is_empty() {
+        return true;
+    }
+
+    cfg.mount_points.iter().any(|mount| mount == mounted_on)
+}
+
+fn build_disk_payload(
+    cfg: &MetricsConfig,
+    system: &System,
+    timestamp_us: u64,
+) -> Option<serde_json::Value> {
     match system.mounts() {
         Ok(mounts) => {
             let items: Vec<_> = mounts
                 .into_iter()
+                .filter(|mount| {
+                    include_mount(cfg, &mount.fs_mounted_on, &mount.fs_type, mount.total.as_u64())
+                })
                 .map(|mount| {
                     json!({
                         "fs_mounted_on": mount.fs_mounted_on,
@@ -118,6 +172,7 @@ fn build_disk_payload(system: &System, timestamp_us: u64) -> Option<serde_json::
 }
 
 fn build_metric_payload(
+    cfg: &MetricsConfig,
     kind: &MetricKind,
     system: &System,
     timestamp_us: u64,
@@ -125,7 +180,7 @@ fn build_metric_payload(
     match kind {
         MetricKind::Cpu => build_cpu_payload(system, timestamp_us),
         MetricKind::Memory => build_memory_payload(system, timestamp_us),
-        MetricKind::Disk => build_disk_payload(system, timestamp_us),
+        MetricKind::Disk => build_disk_payload(cfg, system, timestamp_us),
     }
 }
 
@@ -134,6 +189,14 @@ fn current_timestamp_us() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_micros() as u64
+}
+
+fn selected_metrics(cfg: &MetricsConfig) -> Vec<MetricKind> {
+    if cfg.metrics.is_empty() {
+        vec![MetricKind::Cpu, MetricKind::Memory, MetricKind::Disk]
+    } else {
+        cfg.metrics.clone()
+    }
 }
 
 fn metric_name(kind: &MetricKind) -> &'static str {
@@ -195,11 +258,7 @@ impl InputLauncher for MetricsInstance {
             bail!("Metrics input repeat_interval must be greater than 0 seconds");
         }
 
-        let selected_metrics = if cfg.metrics.is_empty() {
-            vec![MetricKind::Cpu, MetricKind::Memory, MetricKind::Disk]
-        } else {
-            cfg.metrics.clone()
-        };
+        let selected_metrics = selected_metrics(&cfg);
 
         info!(
             "Launching metrics input every {}s with {} selected metric(s) and prefix '{}'",
@@ -243,7 +302,7 @@ impl InputLauncher for MetricsInstance {
                         for kind in &selected_metrics {
                             let timestamp_us = current_timestamp_us();
 
-                            let Some(payload) = build_metric_payload(kind, &system, timestamp_us) else {
+                            let Some(payload) = build_metric_payload(&cfg, kind, &system, timestamp_us) else {
                                 warn!("Failed to collect {:?} metrics, skipping this tick", kind);
                                 continue;
                             };
@@ -265,5 +324,213 @@ impl InputLauncher for MetricsInstance {
         });
 
         Ok(tx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MetricKind, MetricsConfig, MetricsLabelRule, build_labels, build_record, include_mount,
+        selected_metrics, MetricsInstance,
+    };
+    use crate::input::InputLauncher;
+    use crate::message::Message;
+    use serde_json::json;
+    use std::collections::HashMap;
+    use tokio::sync::mpsc::channel;
+    use tokio::time::{Duration, timeout};
+
+    #[test]
+    fn parses_defaults_for_metrics_config() {
+        let cfg: MetricsConfig = toml::from_str(
+            r#"
+            repeat_interval = 5
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(cfg.repeat_interval, 5);
+        assert_eq!(cfg.entry_prefix, "/metrics");
+        assert!(cfg.metrics.is_empty());
+        assert!(cfg.mount_points.is_empty());
+        assert!(!cfg.ignore_fs.is_empty());
+        assert!(cfg.labels.is_empty());
+    }
+
+    #[test]
+    fn defaults_to_all_metrics_when_none_selected() {
+        let cfg: MetricsConfig = toml::from_str(
+            r#"
+            repeat_interval = 5
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            selected_metrics(&cfg),
+            vec![MetricKind::Cpu, MetricKind::Memory, MetricKind::Disk]
+        );
+    }
+
+    #[test]
+    fn keeps_explicit_metric_selection() {
+        let cfg: MetricsConfig = toml::from_str(
+            r#"
+            repeat_interval = 5
+            metrics = ["cpu", "disk"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(selected_metrics(&cfg), vec![MetricKind::Cpu, MetricKind::Disk]);
+    }
+
+    #[test]
+    fn builds_static_and_field_labels() {
+        let payload = json!({
+            "user_percent": 12.5,
+            "nested": {
+                "name": "host-a"
+            }
+        });
+        let rules = vec![
+            MetricsLabelRule::Static {
+                r#static: HashMap::from([("source".to_string(), "metrics".to_string())]),
+            },
+            MetricsLabelRule::Field {
+                field: "user_percent".to_string(),
+                label: "cpu_user".to_string(),
+            },
+            MetricsLabelRule::Field {
+                field: "nested.name".to_string(),
+                label: "host".to_string(),
+            },
+        ];
+
+        let labels = build_labels(&rules, &payload);
+
+        assert_eq!(labels.get("source"), Some(&"metrics".to_string()));
+        assert_eq!(labels.get("cpu_user"), Some(&"12.5".to_string()));
+        assert_eq!(labels.get("host"), Some(&"host-a".to_string()));
+    }
+
+    #[test]
+    fn builds_record_with_default_entry_prefix_and_json_type() {
+        let cfg: MetricsConfig = toml::from_str(
+            r#"
+            repeat_interval = 5
+            labels = [{ static = { source = "metrics" } }]
+            "#,
+        )
+        .unwrap();
+        let payload = json!({
+            "timestamp_us": 42,
+            "user_percent": 10.0
+        });
+
+        let record = build_record(&cfg, &MetricKind::Cpu, &payload, 42).unwrap();
+
+        assert_eq!(record.timestamp_us, 42);
+        assert_eq!(record.entry_name, "/metrics/cpu");
+        assert_eq!(record.content_type, Some("application/json".to_string()));
+        assert_eq!(record.labels.get("source"), Some(&"metrics".to_string()));
+    }
+
+    #[test]
+    fn ignores_filtered_filesystems_and_zero_sized_mounts() {
+        let cfg: MetricsConfig = toml::from_str(
+            r#"
+            repeat_interval = 5
+            "#,
+        )
+        .unwrap();
+
+        assert!(!include_mount(&cfg, "/sys", "sysfs", 0));
+        assert!(!include_mount(&cfg, "/snap/core", "squashfs", 1024));
+        assert!(include_mount(&cfg, "/", "ext4", 1024));
+    }
+
+    #[test]
+    fn mount_points_override_keeps_only_selected_mounts() {
+        let cfg: MetricsConfig = toml::from_str(
+            r#"
+            repeat_interval = 5
+            mount_points = ["/data"]
+            "#,
+        )
+        .unwrap();
+
+        assert!(include_mount(&cfg, "/data", "ext4", 1024));
+        assert!(!include_mount(&cfg, "/", "ext4", 1024));
+    }
+
+    #[tokio::test]
+    async fn rejects_zero_repeat_interval() {
+        let cfg: MetricsConfig = toml::from_str(
+            r#"
+            repeat_interval = 0
+            "#,
+        )
+        .unwrap();
+        let (pipeline_tx, _pipeline_rx) = channel::<Message>(8);
+
+        let err = MetricsInstance::new(cfg)
+            .launch(pipeline_tx)
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("repeat_interval must be greater than 0"));
+    }
+
+    #[tokio::test]
+    async fn launch_emits_metric_record_and_stops() {
+        let cfg: MetricsConfig = toml::from_str(
+            r#"
+            repeat_interval = 2
+            metrics = ["memory"]
+            "#,
+        )
+        .unwrap();
+        let (pipeline_tx, mut pipeline_rx) = channel::<Message>(8);
+
+        let control_tx = MetricsInstance::new(cfg).launch(pipeline_tx).await.unwrap();
+
+        let message = timeout(Duration::from_secs(4), pipeline_rx.recv())
+            .await
+            .expect("timed out waiting for metric message")
+            .expect("pipeline channel closed");
+
+        match message {
+            Message::Data(record) => {
+                assert_eq!(record.entry_name, "/metrics/memory");
+                assert_eq!(
+                    record.content_type,
+                    Some("application/json".to_string())
+                );
+            }
+            other => panic!("expected data message, got {other:?}"),
+        }
+
+        control_tx.send(Message::Stop).await.unwrap();
+    }
+
+    #[test]
+    fn example_metric_config_deserializes() {
+        let config_text = std::fs::read_to_string("examples/metric_config.toml").unwrap();
+        let config: toml::Value = toml::from_str(&config_text).unwrap();
+        let entry = config
+            .get("inputs")
+            .and_then(|v| v.get("metrics"))
+            .and_then(|v| v.get("metrics_all"))
+            .cloned()
+            .unwrap();
+
+        let cfg: MetricsConfig = entry.try_into().unwrap();
+
+        assert_eq!(cfg.repeat_interval, 1);
+        assert!(cfg.metrics.is_empty());
+        assert_eq!(cfg.entry_prefix, "/metrics");
+        assert_eq!(cfg.labels.len(), 1);
     }
 }
