@@ -19,9 +19,9 @@ metrics = ["cpu", "memory", "disk"]
 
 # Optional: entry prefix for produced records (default = "metrics").
 # Records are written to:
-#   <entry_prefix>-cpu
-#   <entry_prefix>-memory
-#   <entry_prefix>-disk
+#   <entry_prefix>/cpu
+#   <entry_prefix>/memory
+#   <entry_prefix>/disk
 entry_prefix = "metrics"
 
 # Optional: only include these mount points in disk metrics (default = []).
@@ -104,7 +104,7 @@ cargo build --no-default-features --features all-inputs
 
 - If `metrics` is empty or omitted, the input collects all supported metrics.
 - Records are written as JSON with content type `application/json`.
-- Entry names use ReductStore-compatible formatting such as `metrics-cpu`.
+- Entry names use hierarchical paths such as `metrics/cpu`.
 - CPU aggregation uses `systemstat::cpu_load_aggregate()` and waits about one second before calling `.done()`.
 - Disk filtering uses `ignore_fs` and optional `mount_points`.
 - Empty `mount_points` means all mounts are considered before filesystem-type filtering.

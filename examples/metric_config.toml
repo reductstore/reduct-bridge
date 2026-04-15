@@ -16,7 +16,7 @@ prefix = ""
 [inputs.metrics.metrics_all]
 # Repeat metric collection every N seconds.
 repeat_interval = 1
-# Optional: records are written as metrics-cpu, metrics-memory, metrics-disk by default.
+# Optional: records are written as metrics/cpu, metrics/memory, metrics/disk by default.
 # entry_prefix = "metrics"
 # Optional: collect all supported metrics if omitted.
 # metrics = ["cpu", "memory", "disk"]
@@ -33,5 +33,5 @@ remote = "local"
 inputs = ["metrics_all"]
 # Optional pipeline-level label routing rules.
 labels = [
-    { from = "metrics-cpu", labels = ["user_percent"], to = "*" }
+    { from = "metrics/cpu", labels = ["user_percent"], to = "*" }
 ]

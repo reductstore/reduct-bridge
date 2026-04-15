@@ -256,7 +256,7 @@ fn build_record(
     Ok(Record {
         timestamp_us,
         entry_name: format!(
-            "{}-{}",
+            "{}/{}",
             cfg.entry_prefix.trim_matches('/'),
             metric_name(kind)
         ),
@@ -451,7 +451,7 @@ mod tests {
         let record = build_record(&cfg, &MetricKind::Cpu, &payload, 42).unwrap();
 
         assert_eq!(record.timestamp_us, 42);
-        assert_eq!(record.entry_name, "metrics-cpu");
+        assert_eq!(record.entry_name, "metrics/cpu");
         assert_eq!(record.content_type, Some("application/json".to_string()));
         assert_eq!(record.labels.get("source"), Some(&"metrics".to_string()));
     }
@@ -523,7 +523,7 @@ mod tests {
 
         match message {
             Message::Data(record) => {
-                assert_eq!(record.entry_name, "metrics-memory");
+                assert_eq!(record.entry_name, "metrics/memory");
                 assert_eq!(record.content_type, Some("application/json".to_string()));
             }
             other => panic!("expected data message, got {other:?}"),
