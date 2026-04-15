@@ -11,6 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+#[cfg(feature = "metrics")]
+mod metrics;
 #[cfg(feature = "ros1")]
 mod ros1;
 #[cfg(feature = "ros2")]
@@ -70,6 +73,13 @@ impl InputBuilder {
                 let input_cfg: shell::ShellConfig = parse_entry(input_table)?;
                 debug!("Creating shell launcher for input '{}'", input_name);
                 let launcher = shell::ShellInstance::new(input_cfg);
+                launcher.launch(pipeline_tx).await
+            }
+            #[cfg(feature = "metrics")]
+            "metrics" => {
+                let input_cfg: metrics::MetricsConfig = parse_entry(input_table)?;
+                debug!("Creating metrics launcher for input '{}'", input_name);
+                let launcher = metrics::MetricsInstance::new(input_cfg);
                 launcher.launch(pipeline_tx).await
             }
             _ => bail!(

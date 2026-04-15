@@ -52,14 +52,14 @@ jobs:
             target: "x86_64-unknown-linux-gnu"
             os: ubuntu-24.04
             compiler: "gcc"
-            cargo_args: "--no-default-features --features shell,ros2"
+            cargo_args: "--no-default-features --features shell,ros2,metrics"
             ros_distro: "jazzy"
             ros_setup_script: "/opt/ros/jazzy/setup.bash"
           - artifact_prefix: "bridge-ros2-humble"
             target: "x86_64-unknown-linux-gnu"
             os: ubuntu-22.04
             compiler: "gcc"
-            cargo_args: "--no-default-features --features shell,ros2"
+            cargo_args: "--no-default-features --features shell,ros2,metrics"
             ros_distro: "humble"
             ros_setup_script: "/opt/ros/humble/setup.bash"
     steps:
