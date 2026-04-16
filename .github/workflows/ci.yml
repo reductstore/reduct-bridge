@@ -23,7 +23,6 @@ permissions:
 env:
   REGISTRY_IMAGE: reduct/bridge
   AWS_LC_SYS_USE_PREBUILT: 0
-  ROS2_CACHE_VERSION: v1
 
 jobs:
   rust_fmt:
@@ -65,33 +64,14 @@ jobs:
             ros_setup_script: "/opt/ros/humble/setup.bash"
     steps:
       - uses: actions/checkout@v4
-      - name: Restore ROS2 cache
-        if: ${{ matrix.ros_setup_script != '' }}
-        id: ros2-cache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            /opt/ros/${{ matrix.ros_distro }}
-            /etc/apt/sources.list.d/ros2.list
-            /usr/share/keyrings/ros-archive-keyring.gpg
-          key: ros2-${{ env.ROS2_CACHE_VERSION }}-${{ matrix.os }}-${{ matrix.ros_distro }}
       - name: Install ROS2
-        if: ${{ matrix.ros_setup_script != '' && steps.ros2-cache-restore.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.ros_setup_script != '' }}
         uses: ros-tooling/setup-ros@v0.7
         with:
           required-ros-distributions: ${{ matrix.ros_distro }}
       - name: Install ROS2 interface packages
-        if: ${{ matrix.ros_setup_script != '' && steps.ros2-cache-restore.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.ros_setup_script != '' }}
         run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
-      - name: Save ROS2 cache
-        if: ${{ matrix.ros_setup_script != '' && steps.ros2-cache-restore.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            /opt/ros/${{ matrix.ros_distro }}
-            /etc/apt/sources.list.d/ros2.list
-            /usr/share/keyrings/ros-archive-keyring.gpg
-          key: ros2-${{ env.ROS2_CACHE_VERSION }}-${{ matrix.os }}-${{ matrix.ros_distro }}
       - uses: ./.github/actions/build-binaries
         with:
           minimal_rust_version: ${{ vars.MINIMAL_RUST_VERSION || 'stable' }}
@@ -133,23 +113,13 @@ jobs:
       RUST_LOG: debug
     steps:
       - uses: actions/checkout@v4
-      - name: Restore ROS2 cache
-        if: ${{ matrix.ros_setup_script != '' }}
-        id: ros2-cache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            /opt/ros/${{ matrix.ros_distro }}
-            /etc/apt/sources.list.d/ros2.list
-            /usr/share/keyrings/ros-archive-keyring.gpg
-          key: ros2-${{ env.ROS2_CACHE_VERSION }}-${{ matrix.os }}-${{ matrix.ros_distro }}
       - name: Install ROS2
-        if: ${{ matrix.ros_setup_script != '' && steps.ros2-cache-restore.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.ros_setup_script != '' }}
         uses: ros-tooling/setup-ros@v0.7
         with:
           required-ros-distributions: ${{ matrix.ros_distro }}
       - name: Install ROS2 interface packages
-        if: ${{ matrix.ros_setup_script != '' && steps.ros2-cache-restore.outputs.cache-hit != 'true' }}
+        if: ${{ matrix.ros_setup_script != '' }}
         run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
       - name: Download test artifact
         uses: actions/download-artifact@v4
@@ -227,22 +197,11 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Restore ROS2 cache
-        id: ros2-cache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            /opt/ros/${{ matrix.ros_distro }}
-            /etc/apt/sources.list.d/ros2.list
-            /usr/share/keyrings/ros-archive-keyring.gpg
-          key: ros2-${{ env.ROS2_CACHE_VERSION }}-${{ matrix.os }}-${{ matrix.ros_distro }}
       - name: Install ROS2
-        if: ${{ steps.ros2-cache-restore.outputs.cache-hit != 'true' }}
         uses: ros-tooling/setup-ros@v0.7
         with:
           required-ros-distributions: ${{ matrix.ros_distro }}
       - name: Install ROS2 interface packages
-        if: ${{ steps.ros2-cache-restore.outputs.cache-hit != 'true' }}
         run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
       - name: Download reduct-bridge Linux artifact
         uses: actions/download-artifact@v4
@@ -267,22 +226,11 @@ jobs:
       RUST_LOG: debug
     steps:
       - uses: actions/checkout@v4
-      - name: Restore ROS2 cache
-        id: ros2-cache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            /opt/ros/jazzy
-            /etc/apt/sources.list.d/ros2.list
-            /usr/share/keyrings/ros-archive-keyring.gpg
-          key: ros2-${{ env.ROS2_CACHE_VERSION }}-ubuntu-24.04-jazzy
       - name: Install ROS2
-        if: ${{ steps.ros2-cache-restore.outputs.cache-hit != 'true' }}
         uses: ros-tooling/setup-ros@v0.7
         with:
           required-ros-distributions: jazzy
       - name: Install ROS2 interface packages
-        if: ${{ steps.ros2-cache-restore.outputs.cache-hit != 'true' }}
         run: sudo apt-get update && sudo apt-get install -y ros-jazzy-example-interfaces ros-jazzy-test-msgs
 
       - uses: ./.github/actions/coverage
