@@ -468,6 +468,7 @@ mod tests {
     use crate::message::Message;
     use crate::runtime::ComponentRuntime;
     use std::sync::Arc;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc::channel;
     use tokio::time::{Duration, sleep, timeout};
@@ -523,6 +524,66 @@ mod tests {
         assert!(
             completed.load(Ordering::SeqCst),
             "component should complete before shutdown returns"
+        );
+    }
+
+    fn ordered_component(
+        name: &'static str,
+        delay: Duration,
+        events: Arc<Mutex<Vec<&'static str>>>,
+    ) -> ComponentRuntime {
+        let (tx, mut rx) = channel::<Message>(8);
+        let task = tokio::spawn(async move {
+            while let Some(message) = rx.recv().await {
+                if matches!(message, Message::Stop) {
+                    events.lock().expect("events lock").push(match name {
+                        "input" => "input_stop_received",
+                        "pipeline" => "pipeline_stop_received",
+                        _ => "unknown_stop_received",
+                    });
+                    sleep(delay).await;
+                    events.lock().expect("events lock").push(match name {
+                        "input" => "input_completed",
+                        "pipeline" => "pipeline_completed",
+                        _ => "unknown_completed",
+                    });
+                    break;
+                }
+            }
+        });
+
+        ComponentRuntime { tx, task }
+    }
+
+    #[tokio::test]
+    async fn stop_shuts_down_stages_in_order() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let runtime = PipelineRuntime {
+            inputs: vec![ordered_component(
+                "input",
+                Duration::from_millis(100),
+                Arc::clone(&events),
+            )],
+            input_routers: vec![],
+            pipelines: vec![ordered_component(
+                "pipeline",
+                Duration::from_millis(10),
+                Arc::clone(&events),
+            )],
+            remotes: vec![],
+        };
+
+        runtime.stop().await;
+
+        let events = events.lock().expect("events lock");
+        assert_eq!(
+            events.as_slice(),
+            [
+                "input_stop_received",
+                "input_completed",
+                "pipeline_stop_received",
+                "pipeline_completed",
+            ]
         );
     }
 }
