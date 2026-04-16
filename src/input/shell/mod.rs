@@ -163,6 +163,7 @@ impl InputLauncher for ShellInstance {
             cfg.repeat_interval, cfg.entry_name, cfg.command
         );
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
+        let runtime_name = cfg.entry_name.clone();
         let task = tokio::spawn(async move {
             debug!("Shell worker task started");
             let mut ticker = interval(Duration::from_secs(cfg.repeat_interval));
@@ -231,7 +232,12 @@ impl InputLauncher for ShellInstance {
             }
         });
 
-        Ok(ComponentRuntime { tx, task })
+        Ok(ComponentRuntime {
+            name: runtime_name,
+            kind: "input",
+            tx,
+            task,
+        })
     }
 }
 

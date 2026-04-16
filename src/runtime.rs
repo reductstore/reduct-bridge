@@ -18,6 +18,8 @@ use tokio::task::JoinHandle;
 
 #[derive(Debug)]
 pub struct ComponentRuntime {
+    pub name: String,
+    pub kind: &'static str,
     pub tx: Sender<Message>,
     pub task: JoinHandle<()>,
 }

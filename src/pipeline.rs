@@ -21,9 +21,12 @@ use log::{debug, info, warn};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc::{Sender, channel};
+use tokio::time::{Duration, Instant, timeout};
 use toml::Value;
 
 const CHANNEL_SIZE: usize = 1024;
+const COMPONENT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const GLOBAL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone)]
 struct NamedPipelineConfig {
@@ -208,6 +211,7 @@ impl PipelineLauncher for PassthroughPipelineLauncher {
     async fn launch(&self, remote_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
         let pipeline_name = self.pipeline_name.clone();
+        let runtime_name = pipeline_name.clone();
         let preprocess_keys: Vec<String> = self.preprocess.keys().cloned().collect();
         let mut label_rules: Vec<PipelineLabelRuleRuntime> = self
             .label_rules
@@ -257,7 +261,12 @@ impl PipelineLauncher for PassthroughPipelineLauncher {
             }
         });
 
-        Ok(ComponentRuntime { tx, task })
+        Ok(ComponentRuntime {
+            name: runtime_name,
+            kind: "pipeline",
+            tx,
+            task,
+        })
     }
 
     fn input_names(&self) -> &[String] {
@@ -273,22 +282,55 @@ pub struct PipelineRuntime {
 }
 
 impl PipelineRuntime {
-    async fn stop_stage(stage: Vec<ComponentRuntime>) {
+    async fn stop_stage(stage: Vec<ComponentRuntime>, deadline: Instant) {
         let mut pending = stage;
         for component in &pending {
-            let _ = component.tx.send(Message::Stop).await;
+            if let Err(err) = component.tx.send(Message::Stop).await {
+                debug!(
+                    "Failed to send stop to {} '{}': {}",
+                    component.kind, component.name, err
+                );
+            }
         }
 
         while let Some(component) = pending.pop() {
-            let _ = component.task.await;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                warn!(
+                    "Global shutdown timeout reached before {} '{}' finished",
+                    component.kind, component.name
+                );
+                component.task.abort();
+                continue;
+            }
+
+            let wait_for = remaining.min(COMPONENT_SHUTDOWN_TIMEOUT);
+            match timeout(wait_for, component.task).await {
+                Ok(Ok(())) => {
+                    debug!("{} '{}' stopped cleanly", component.kind, component.name);
+                }
+                Ok(Err(err)) => {
+                    warn!(
+                        "{} '{}' failed during shutdown: {}",
+                        component.kind, component.name, err
+                    );
+                }
+                Err(_) => {
+                    warn!(
+                        "Timed out waiting for {} '{}' to stop",
+                        component.kind, component.name
+                    );
+                }
+            }
         }
     }
 
     pub async fn stop(self) {
-        Self::stop_stage(self.inputs).await;
-        Self::stop_stage(self.fanouts).await;
-        Self::stop_stage(self.pipelines).await;
-        Self::stop_stage(self.remotes).await;
+        let deadline = Instant::now() + GLOBAL_SHUTDOWN_TIMEOUT;
+        Self::stop_stage(self.inputs, deadline).await;
+        Self::stop_stage(self.fanouts, deadline).await;
+        Self::stop_stage(self.pipelines, deadline).await;
+        Self::stop_stage(self.remotes, deadline).await;
     }
 }
 
@@ -372,6 +414,7 @@ impl PipelineBuilder {
 
             let (fanout_tx, mut fanout_rx) = channel::<Message>(CHANNEL_SIZE);
             let route_name = input_name.clone();
+            let fanout_runtime_name = route_name.clone();
             let fanout_task = tokio::spawn(async move {
                 debug!("Fan-out worker started for input '{}'", route_name);
                 while let Some(message) = fanout_rx.recv().await {
@@ -394,6 +437,8 @@ impl PipelineBuilder {
                 }
             });
             fanouts.push(ComponentRuntime {
+                name: fanout_runtime_name,
+                kind: "fanout",
                 tx: fanout_tx.clone(),
                 task: fanout_task,
             });

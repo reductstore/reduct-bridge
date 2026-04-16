@@ -42,6 +42,7 @@ impl InputLauncher for Ros1Instance {
         }
 
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
+        let runtime_name = cfg.node_name.clone();
 
         info!(
             "Launching ROS input '{}' with uri '{}'",
@@ -149,6 +150,11 @@ impl InputLauncher for Ros1Instance {
             }
         });
 
-        Ok(ComponentRuntime { tx, task })
+        Ok(ComponentRuntime {
+            name: runtime_name,
+            kind: "input",
+            tx,
+            task,
+        })
     }
 }

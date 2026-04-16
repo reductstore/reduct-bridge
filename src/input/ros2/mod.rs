@@ -21,6 +21,7 @@ impl InputLauncher for Ros2Instance {
     async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
         let cfg = self.cfg.clone();
         let control_node_name = cfg.node_name.clone();
+        let runtime_name = cfg.node_name.clone();
         if cfg.queue_size == 0 {
             bail!("ROS2 input queue_size must be greater than 0");
         }
@@ -81,6 +82,11 @@ impl InputLauncher for Ros2Instance {
             }
         });
 
-        Ok(ComponentRuntime { tx, task })
+        Ok(ComponentRuntime {
+            name: runtime_name,
+            kind: "input",
+            tx,
+            task,
+        })
     }
 }

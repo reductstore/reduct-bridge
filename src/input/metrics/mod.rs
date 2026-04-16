@@ -286,6 +286,7 @@ impl InputLauncher for MetricsInstance {
         );
 
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
+        let runtime_name = cfg.entry_prefix.clone();
         let task = tokio::spawn(async move {
             debug!("Metrics worker task started");
             let mut ticker = interval(Duration::from_secs(cfg.repeat_interval));
@@ -338,7 +339,12 @@ impl InputLauncher for MetricsInstance {
             }
         });
 
-        Ok(ComponentRuntime { tx, task })
+        Ok(ComponentRuntime {
+            name: runtime_name,
+            kind: "input",
+            tx,
+            task,
+        })
     }
 }
 
