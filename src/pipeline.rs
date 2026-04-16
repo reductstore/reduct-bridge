@@ -407,7 +407,9 @@ impl PipelineBuilder {
                 task: input_router_task,
             });
 
-            let input = input_builder.build(config, &input_name, input_router_tx).await?;
+            let input = input_builder
+                .build(config, &input_name, input_router_tx)
+                .await?;
             info!("Input '{}' launcher started", input_name);
             inputs.push(input);
         }
@@ -458,4 +460,69 @@ fn parse_pipeline_configs(config: &Value) -> Result<Vec<NamedPipelineConfig>, Er
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PipelineRuntime;
+    use crate::message::Message;
+    use crate::runtime::ComponentRuntime;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::mpsc::channel;
+    use tokio::time::{Duration, sleep, timeout};
+
+    fn delayed_component(delay: Duration, completed: Arc<AtomicBool>) -> ComponentRuntime {
+        let (tx, mut rx) = channel::<Message>(8);
+        let task = tokio::spawn(async move {
+            while let Some(message) = rx.recv().await {
+                if matches!(message, Message::Stop) {
+                    sleep(delay).await;
+                    completed.store(true, Ordering::SeqCst);
+                    break;
+                }
+            }
+        });
+
+        ComponentRuntime { tx, task }
+    }
+
+    #[tokio::test]
+    async fn stop_waits_for_component_completion() {
+        let completed = Arc::new(AtomicBool::new(false));
+        let runtime = PipelineRuntime {
+            inputs: vec![delayed_component(
+                Duration::from_millis(150),
+                Arc::clone(&completed),
+            )],
+            input_routers: vec![],
+            pipelines: vec![],
+            remotes: vec![],
+        };
+
+        let stop_task = tokio::spawn(async move {
+            runtime.stop().await;
+        });
+        tokio::pin!(stop_task);
+
+        assert!(
+            timeout(Duration::from_millis(50), &mut stop_task)
+                .await
+                .is_err(),
+            "shutdown should still be waiting for component completion"
+        );
+        assert!(
+            !completed.load(Ordering::SeqCst),
+            "component should not have finished yet"
+        );
+
+        timeout(Duration::from_millis(300), &mut stop_task)
+            .await
+            .expect("shutdown should complete after component finishes")
+            .expect("shutdown task should finish cleanly");
+        assert!(
+            completed.load(Ordering::SeqCst),
+            "component should complete before shutdown returns"
+        );
+    }
 }
