@@ -180,7 +180,6 @@ impl RemoteInstanceLauncher for ReductInstance {
             cfg.batch_max_interval_ms
         );
 
-        let runtime_name = format!("{}:{}", cfg.url, cfg.bucket);
         let task = tokio::spawn(async move {
             debug!("Reduct worker task started for {}", cfg.url);
             let mut batch = bucket.write_record_batch();
@@ -225,12 +224,7 @@ impl RemoteInstanceLauncher for ReductInstance {
             }
         });
 
-        Ok(ComponentRuntime {
-            name: runtime_name,
-            kind: "remote",
-            tx,
-            task,
-        })
+        Ok(ComponentRuntime { tx, task })
     }
 }
 

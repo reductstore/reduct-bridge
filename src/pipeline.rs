@@ -21,12 +21,9 @@ use log::{debug, info, warn};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc::{Sender, channel};
-use tokio::time::{Duration, Instant, timeout};
 use toml::Value;
 
 const CHANNEL_SIZE: usize = 1024;
-const COMPONENT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
-const GLOBAL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone)]
 struct NamedPipelineConfig {
@@ -211,7 +208,6 @@ impl PipelineLauncher for PassthroughPipelineLauncher {
     async fn launch(&self, remote_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
         let pipeline_name = self.pipeline_name.clone();
-        let runtime_name = pipeline_name.clone();
         let preprocess_keys: Vec<String> = self.preprocess.keys().cloned().collect();
         let mut label_rules: Vec<PipelineLabelRuleRuntime> = self
             .label_rules
@@ -261,12 +257,7 @@ impl PipelineLauncher for PassthroughPipelineLauncher {
             }
         });
 
-        Ok(ComponentRuntime {
-            name: runtime_name,
-            kind: "pipeline",
-            tx,
-            task,
-        })
+        Ok(ComponentRuntime { tx, task })
     }
 
     fn input_names(&self) -> &[String] {
@@ -276,61 +267,37 @@ impl PipelineLauncher for PassthroughPipelineLauncher {
 
 pub struct PipelineRuntime {
     inputs: Vec<ComponentRuntime>,
-    fanouts: Vec<ComponentRuntime>,
+    input_routers: Vec<ComponentRuntime>,
     pipelines: Vec<ComponentRuntime>,
     remotes: Vec<ComponentRuntime>,
 }
 
 impl PipelineRuntime {
-    async fn stop_stage(stage: Vec<ComponentRuntime>, deadline: Instant) {
+    async fn stop_stage(stage: Vec<ComponentRuntime>) {
         let mut pending = stage;
         for component in &pending {
             if let Err(err) = component.tx.send(Message::Stop).await {
-                debug!(
-                    "Failed to send stop to {} '{}': {}",
-                    component.kind, component.name, err
-                );
+                debug!("Failed to send stop to component: {}", err);
             }
         }
 
         while let Some(component) = pending.pop() {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                warn!(
-                    "Global shutdown timeout reached before {} '{}' finished",
-                    component.kind, component.name
-                );
-                component.task.abort();
-                continue;
-            }
-
-            let wait_for = remaining.min(COMPONENT_SHUTDOWN_TIMEOUT);
-            match timeout(wait_for, component.task).await {
-                Ok(Ok(())) => {
-                    debug!("{} '{}' stopped cleanly", component.kind, component.name);
+            match component.task.await {
+                Ok(()) => {
+                    debug!("Component stopped cleanly");
                 }
-                Ok(Err(err)) => {
-                    warn!(
-                        "{} '{}' failed during shutdown: {}",
-                        component.kind, component.name, err
-                    );
-                }
-                Err(_) => {
-                    warn!(
-                        "Timed out waiting for {} '{}' to stop",
-                        component.kind, component.name
-                    );
+                Err(err) => {
+                    warn!("Component failed during shutdown: {}", err);
                 }
             }
         }
     }
 
     pub async fn stop(self) {
-        let deadline = Instant::now() + GLOBAL_SHUTDOWN_TIMEOUT;
-        Self::stop_stage(self.inputs, deadline).await;
-        Self::stop_stage(self.fanouts, deadline).await;
-        Self::stop_stage(self.pipelines, deadline).await;
-        Self::stop_stage(self.remotes, deadline).await;
+        Self::stop_stage(self.inputs).await;
+        Self::stop_stage(self.input_routers).await;
+        Self::stop_stage(self.pipelines).await;
+        Self::stop_stage(self.remotes).await;
     }
 }
 
@@ -395,7 +362,7 @@ impl PipelineBuilder {
         }
 
         let mut inputs: Vec<ComponentRuntime> = Vec::new();
-        let mut fanouts: Vec<ComponentRuntime> = Vec::new();
+        let mut input_routers: Vec<ComponentRuntime> = Vec::new();
         let mut input_names: HashSet<String> = HashSet::new();
         for cfg in &pipeline_configs {
             for input_name in &cfg.inputs {
@@ -412,15 +379,14 @@ impl PipelineBuilder {
                 );
             }
 
-            let (fanout_tx, mut fanout_rx) = channel::<Message>(CHANNEL_SIZE);
+            let (input_router_tx, mut input_router_rx) = channel::<Message>(CHANNEL_SIZE);
             let route_name = input_name.clone();
-            let fanout_runtime_name = route_name.clone();
-            let fanout_task = tokio::spawn(async move {
-                debug!("Fan-out worker started for input '{}'", route_name);
-                while let Some(message) = fanout_rx.recv().await {
+            let input_router_task = tokio::spawn(async move {
+                debug!("Input router started for input '{}'", route_name);
+                while let Some(message) = input_router_rx.recv().await {
                     match message {
                         Message::Stop => {
-                            info!("Fan-out worker for input '{}' stopping", route_name);
+                            info!("Input router for input '{}' stopping", route_name);
                             break;
                         }
                         other => {
@@ -436,21 +402,19 @@ impl PipelineBuilder {
                     }
                 }
             });
-            fanouts.push(ComponentRuntime {
-                name: fanout_runtime_name,
-                kind: "fanout",
-                tx: fanout_tx.clone(),
-                task: fanout_task,
+            input_routers.push(ComponentRuntime {
+                tx: input_router_tx.clone(),
+                task: input_router_task,
             });
 
-            let input = input_builder.build(config, &input_name, fanout_tx).await?;
+            let input = input_builder.build(config, &input_name, input_router_tx).await?;
             info!("Input '{}' launcher started", input_name);
             inputs.push(input);
         }
 
         Ok(PipelineRuntime {
             inputs,
-            fanouts,
+            input_routers,
             pipelines,
             remotes,
         })
