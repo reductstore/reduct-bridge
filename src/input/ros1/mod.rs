@@ -13,6 +13,7 @@
 // limitations under the License.
 use crate::input::InputLauncher;
 use crate::message::Message;
+use crate::runtime::ComponentRuntime;
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
@@ -31,7 +32,7 @@ const CHANNEL_SIZE: usize = 1024;
 
 #[async_trait]
 impl InputLauncher for Ros1Instance {
-    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<Sender<Message>, Error> {
+    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
         let cfg = self.cfg.clone();
         if cfg.queue_size == 0 {
             bail!("ROS input queue_size must be greater than 0");
@@ -121,7 +122,7 @@ impl InputLauncher for Ros1Instance {
         .await
         .map_err(|err| anyhow!("ROS startup worker task for '{}' failed: {}", cfg.node_name, err))??;
 
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             debug!("ROS worker task started for {}", cfg.node_name);
 
             loop {
@@ -129,9 +130,6 @@ impl InputLauncher for Ros1Instance {
                     Some(Message::Stop) => {
                         drop(subscribers);
                         debug!("ROS subscribers dropped");
-                        if let Err(err) = pipeline_tx.send(Message::Stop).await {
-                            warn!("Failed to forward ROS stop message to pipeline: {}", err);
-                        }
                         info!("Stop message received, shutting down ROS worker");
                         break;
                     }
@@ -151,6 +149,6 @@ impl InputLauncher for Ros1Instance {
             }
         });
 
-        Ok(tx)
+        Ok(ComponentRuntime { tx, task })
     }
 }

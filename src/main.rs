@@ -18,6 +18,7 @@ mod input;
 mod message;
 mod pipeline;
 mod remote;
+mod runtime;
 
 use crate::cfg::parse_config_file;
 use crate::input::InputBuilder;

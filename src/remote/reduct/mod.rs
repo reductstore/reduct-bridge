@@ -13,11 +13,12 @@
 // limitations under the License.
 use crate::message::{Attachment, Message, Record};
 use crate::remote::RemoteInstanceLauncher;
+use crate::runtime::ComponentRuntime;
 use anyhow::{Error, anyhow, bail};
 use log::{debug, info, warn};
 use reduct_rs::{Bucket, RecordBuilder, ReductClient, WriteRecordBatchBuilder};
 use serde::Deserialize;
-use tokio::sync::mpsc::{Sender, channel};
+use tokio::sync::mpsc::channel;
 use tokio::time::{Duration, MissedTickBehavior, interval};
 
 const CHANNEL_SIZE: usize = 1024;
@@ -146,7 +147,7 @@ impl ReductInstance {
 
 #[async_trait::async_trait]
 impl RemoteInstanceLauncher for ReductInstance {
-    async fn launch(&self) -> Result<Sender<Message>, Error> {
+    async fn launch(&self) -> Result<ComponentRuntime, Error> {
         let cfg = self.cfg.clone();
         if cfg.batch_max_records == 0 {
             bail!("Reduct remote batch_max_records must be greater than 0");
@@ -179,7 +180,7 @@ impl RemoteInstanceLauncher for ReductInstance {
             cfg.batch_max_interval_ms
         );
 
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             debug!("Reduct worker task started for {}", cfg.url);
             let mut batch = bucket.write_record_batch();
             let mut flush_ticker = interval(Duration::from_millis(cfg.batch_max_interval_ms));
@@ -223,7 +224,7 @@ impl RemoteInstanceLauncher for ReductInstance {
             }
         });
 
-        Ok(tx)
+        Ok(ComponentRuntime { tx, task })
     }
 }
 
@@ -389,14 +390,16 @@ mod tests {
             batch_max_interval_ms: 50,
         });
 
-        let tx = remote.launch().await.expect("launch remote");
-        tx.send(data_message).await.expect("send data");
-        tx.send(ros_attachment_message)
+        let runtime = remote.launch().await.expect("launch remote");
+        runtime.tx.send(data_message).await.expect("send data");
+        runtime
+            .tx
+            .send(ros_attachment_message)
             .await
             .expect("send attachment");
 
-        tx.send(Message::Stop).await.expect("send stop");
-        sleep(Duration::from_millis(400)).await;
+        runtime.tx.send(Message::Stop).await.expect("send stop");
+        runtime.task.await.expect("join remote");
 
         let bucket = client.get_bucket(&bucket_name).await.expect("get bucket");
         let mut query = bucket.query("it/entry").send().await.expect("query");
