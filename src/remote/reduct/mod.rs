@@ -11,7 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::message::{Attachment, Message, Record};
+#[cfg(any(feature = "ros1", feature = "ros2"))]
+use crate::message::Attachment;
+use crate::message::{Message, Record};
 use crate::remote::RemoteInstanceLauncher;
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, anyhow, bail};
@@ -128,6 +130,7 @@ impl ReductInstance {
         }
     }
 
+    #[cfg(any(feature = "ros1", feature = "ros2"))]
     async fn write_attachment(cfg: &RemoteConfig, bucket: &Bucket, attachment: Attachment) {
         let Some(entry) = Self::normalize_entry_path(&cfg.prefix, &attachment.entry_name) else {
             warn!(
@@ -200,6 +203,7 @@ impl RemoteInstanceLauncher for ReductInstance {
                                     }
                                 }
                             }
+                            #[cfg(any(feature = "ros1", feature = "ros2"))]
                             Some(Message::Attachment(attachment)) => {
                                 Self::write_attachment(&cfg, &bucket, attachment).await;
                             }
@@ -231,7 +235,9 @@ impl RemoteInstanceLauncher for ReductInstance {
 #[cfg(all(test, feature = "ci"))]
 mod tests {
     use super::{ReductInstance, RemoteConfig};
-    use crate::message::{Attachment, Message, Record};
+    #[cfg(any(feature = "ros1", feature = "ros2"))]
+    use crate::message::Attachment;
+    use crate::message::{Message, Record};
     use crate::remote::RemoteInstanceLauncher;
     use bytes::Bytes;
     use futures_util::StreamExt;
@@ -301,6 +307,7 @@ mod tests {
         })
     }
 
+    #[cfg(any(feature = "ros1", feature = "ros2"))]
     #[fixture]
     fn ros_attachment_message() -> Message {
         Message::Attachment(Attachment {
@@ -330,6 +337,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[cfg(any(feature = "ros1", feature = "ros2"))]
     async fn docker_reductstore_roundtrip_data_and_attachment(
         data_message: Message,
         ros_attachment_message: Message,

@@ -27,6 +27,30 @@ use crate::remote::RemoteBuilder;
 use anyhow::Context;
 use log::info;
 
+#[cfg(unix)]
+async fn wait_for_shutdown_signal() -> anyhow::Result<&'static str> {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let mut sigterm =
+        signal(SignalKind::terminate()).context("Failed to listen for SIGTERM")?;
+
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => {
+            result.context("Failed to listen for Ctrl+C")?;
+            Ok("Ctrl+C")
+        }
+        _ = sigterm.recv() => Ok("SIGTERM"),
+    }
+}
+
+#[cfg(not(unix))]
+async fn wait_for_shutdown_signal() -> anyhow::Result<&'static str> {
+    tokio::signal::ctrl_c()
+        .await
+        .context("Failed to listen for Ctrl+C")?;
+    Ok("Ctrl+C")
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
@@ -45,12 +69,10 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     info!("Pipeline runtime started");
 
-    info!("Waiting for Ctrl+C");
-    tokio::signal::ctrl_c()
-        .await
-        .context("Failed to listen for Ctrl+C")?;
+    info!("Waiting for shutdown signal");
+    let signal = wait_for_shutdown_signal().await?;
 
-    info!("Ctrl+C received, sending stop messages");
+    info!("{} received, sending stop messages", signal);
     runtime.stop().await;
     info!("Shutdown complete");
 
