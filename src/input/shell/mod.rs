@@ -13,6 +13,7 @@
 // limitations under the License.
 use crate::input::InputLauncher;
 use crate::message::{Message, Record};
+use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
@@ -147,7 +148,7 @@ impl ShellInstance {
 
 #[async_trait]
 impl InputLauncher for ShellInstance {
-    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<Sender<Message>, Error> {
+    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
         let cfg = self.cfg.clone();
         if cfg.repeat_interval == 0 {
             bail!("Shell input repeat_interval must be greater than 0 seconds");
@@ -162,7 +163,7 @@ impl InputLauncher for ShellInstance {
             cfg.repeat_interval, cfg.entry_name, cfg.command
         );
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             debug!("Shell worker task started");
             let mut ticker = interval(Duration::from_secs(cfg.repeat_interval));
 
@@ -171,9 +172,6 @@ impl InputLauncher for ShellInstance {
                     maybe_message = rx.recv() => {
                         match maybe_message {
                             Some(Message::Stop) => {
-                                if let Err(err) = pipeline_tx.send(Message::Stop).await {
-                                    warn!("Failed to forward shell stop message to pipeline: {}", err);
-                                }
                                 info!("Stop message received, shutting down shell worker");
                                 break;
                             }
@@ -233,7 +231,7 @@ impl InputLauncher for ShellInstance {
             }
         });
 
-        Ok(tx)
+        Ok(ComponentRuntime { tx, task })
     }
 }
 

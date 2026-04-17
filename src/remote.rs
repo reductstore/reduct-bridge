@@ -14,16 +14,15 @@
 mod reduct;
 
 use crate::cfg::{find_named_entry, parse_entry};
-use crate::message::Message;
+use crate::runtime::ComponentRuntime;
 use anyhow::{Error, bail};
 use async_trait::async_trait;
 use log::debug;
-use tokio::sync::mpsc::Sender;
 use toml::Value;
 
 #[async_trait]
 pub trait RemoteInstanceLauncher: Send + Sync {
-    async fn launch(&self) -> Result<Sender<Message>, Error>;
+    async fn launch(&self) -> Result<ComponentRuntime, Error>;
 }
 
 pub struct RemoteBuilder;
@@ -33,7 +32,11 @@ impl RemoteBuilder {
         Self
     }
 
-    pub async fn build(&self, config: &Value, remote_name: &str) -> Result<Sender<Message>, Error> {
+    pub async fn build(
+        &self,
+        config: &Value,
+        remote_name: &str,
+    ) -> Result<ComponentRuntime, Error> {
         let (remote_type, remote_table) = find_named_entry(config, "remotes", remote_name)?;
         debug!(
             "Selected remote '{}' from dynamic section type '{}'",

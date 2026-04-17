@@ -1,5 +1,6 @@
 use crate::input::InputLauncher;
 use crate::message::Message;
+use crate::runtime::ComponentRuntime;
 use anyhow::{Error, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
@@ -17,7 +18,7 @@ const CHANNEL_SIZE: usize = 1024;
 
 #[async_trait]
 impl InputLauncher for Ros2Instance {
-    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<Sender<Message>, Error> {
+    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
         let cfg = self.cfg.clone();
         let control_node_name = cfg.node_name.clone();
         if cfg.queue_size == 0 {
@@ -51,7 +52,7 @@ impl InputLauncher for Ros2Instance {
             Err(err) => bail!("ROS2 worker failed during startup: {}", err),
         }
 
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             debug!("ROS2 control task started for {}", control_node_name);
 
             loop {
@@ -60,9 +61,6 @@ impl InputLauncher for Ros2Instance {
                         stop.store(true, Ordering::Relaxed);
                         if let Err(err) = tokio::task::spawn_blocking(move || worker.join()).await {
                             warn!("Failed to join ROS2 worker thread: {}", err);
-                        }
-                        if let Err(err) = pipeline_tx.send(Message::Stop).await {
-                            warn!("Failed to forward ROS2 stop message to pipeline: {}", err);
                         }
                         info!("Stop message received, shutting down ROS2 worker");
                         break;
@@ -83,6 +81,6 @@ impl InputLauncher for Ros2Instance {
             }
         });
 
-        Ok(tx)
+        Ok(ComponentRuntime { tx, task })
     }
 }

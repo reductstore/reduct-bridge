@@ -11,13 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use crate::message::{Attachment, Message, Record};
+#[cfg(any(feature = "ros1", feature = "ros2"))]
+use crate::message::Attachment;
+use crate::message::{Message, Record};
 use crate::remote::RemoteInstanceLauncher;
+use crate::runtime::ComponentRuntime;
 use anyhow::{Error, anyhow, bail};
 use log::{debug, info, warn};
 use reduct_rs::{Bucket, RecordBuilder, ReductClient, WriteRecordBatchBuilder};
 use serde::Deserialize;
-use tokio::sync::mpsc::{Sender, channel};
+use tokio::sync::mpsc::channel;
 use tokio::time::{Duration, MissedTickBehavior, interval};
 
 const CHANNEL_SIZE: usize = 1024;
@@ -127,6 +130,7 @@ impl ReductInstance {
         }
     }
 
+    #[cfg(any(feature = "ros1", feature = "ros2"))]
     async fn write_attachment(cfg: &RemoteConfig, bucket: &Bucket, attachment: Attachment) {
         let Some(entry) = Self::normalize_entry_path(&cfg.prefix, &attachment.entry_name) else {
             warn!(
@@ -146,7 +150,7 @@ impl ReductInstance {
 
 #[async_trait::async_trait]
 impl RemoteInstanceLauncher for ReductInstance {
-    async fn launch(&self) -> Result<Sender<Message>, Error> {
+    async fn launch(&self) -> Result<ComponentRuntime, Error> {
         let cfg = self.cfg.clone();
         if cfg.batch_max_records == 0 {
             bail!("Reduct remote batch_max_records must be greater than 0");
@@ -179,7 +183,7 @@ impl RemoteInstanceLauncher for ReductInstance {
             cfg.batch_max_interval_ms
         );
 
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             debug!("Reduct worker task started for {}", cfg.url);
             let mut batch = bucket.write_record_batch();
             let mut flush_ticker = interval(Duration::from_millis(cfg.batch_max_interval_ms));
@@ -199,6 +203,7 @@ impl RemoteInstanceLauncher for ReductInstance {
                                     }
                                 }
                             }
+                            #[cfg(any(feature = "ros1", feature = "ros2"))]
                             Some(Message::Attachment(attachment)) => {
                                 Self::write_attachment(&cfg, &bucket, attachment).await;
                             }
@@ -223,14 +228,16 @@ impl RemoteInstanceLauncher for ReductInstance {
             }
         });
 
-        Ok(tx)
+        Ok(ComponentRuntime { tx, task })
     }
 }
 
 #[cfg(all(test, feature = "ci"))]
 mod tests {
     use super::{ReductInstance, RemoteConfig};
-    use crate::message::{Attachment, Message, Record};
+    #[cfg(any(feature = "ros1", feature = "ros2"))]
+    use crate::message::Attachment;
+    use crate::message::{Message, Record};
     use crate::remote::RemoteInstanceLauncher;
     use bytes::Bytes;
     use futures_util::StreamExt;
@@ -300,6 +307,7 @@ mod tests {
         })
     }
 
+    #[cfg(any(feature = "ros1", feature = "ros2"))]
     #[fixture]
     fn ros_attachment_message() -> Message {
         Message::Attachment(Attachment {
@@ -329,6 +337,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[cfg(any(feature = "ros1", feature = "ros2"))]
     async fn docker_reductstore_roundtrip_data_and_attachment(
         data_message: Message,
         ros_attachment_message: Message,
@@ -389,14 +398,16 @@ mod tests {
             batch_max_interval_ms: 50,
         });
 
-        let tx = remote.launch().await.expect("launch remote");
-        tx.send(data_message).await.expect("send data");
-        tx.send(ros_attachment_message)
+        let runtime = remote.launch().await.expect("launch remote");
+        runtime.tx.send(data_message).await.expect("send data");
+        runtime
+            .tx
+            .send(ros_attachment_message)
             .await
             .expect("send attachment");
 
-        tx.send(Message::Stop).await.expect("send stop");
-        sleep(Duration::from_millis(400)).await;
+        runtime.tx.send(Message::Stop).await.expect("send stop");
+        runtime.task.await.expect("join remote");
 
         let bucket = client.get_bucket(&bucket_name).await.expect("get bucket");
         let mut query = bucket.query("it/entry").send().await.expect("query");

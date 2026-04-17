@@ -15,6 +15,7 @@
 use crate::formats::json::{extract_json_path, value_to_label};
 use crate::input::InputLauncher;
 use crate::message::{Message, Record};
+use crate::runtime::ComponentRuntime;
 use anyhow::{Error, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
@@ -268,7 +269,7 @@ fn build_record(
 
 #[async_trait]
 impl InputLauncher for MetricsInstance {
-    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<Sender<Message>, Error> {
+    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
         let cfg = self.cfg.clone();
 
         if cfg.repeat_interval == 0 {
@@ -285,7 +286,7 @@ impl InputLauncher for MetricsInstance {
         );
 
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             debug!("Metrics worker task started");
             let mut ticker = interval(Duration::from_secs(cfg.repeat_interval));
             let system = System::new();
@@ -295,9 +296,6 @@ impl InputLauncher for MetricsInstance {
                     maybe_msg = rx.recv() => {
                         match maybe_msg {
                             Some(Message::Stop) => {
-                                if let Err(err) = pipeline_tx.send(Message::Stop).await {
-                                    warn!("Failed to forward metrics stop message to pipeline: {}", err);
-                                }
                                 info!("Stop message received, shutting down metrics worker");
                                 break;
                             }
@@ -340,7 +338,7 @@ impl InputLauncher for MetricsInstance {
             }
         });
 
-        Ok(tx)
+        Ok(ComponentRuntime { tx, task })
     }
 }
 
@@ -514,7 +512,7 @@ mod tests {
         .unwrap();
         let (pipeline_tx, mut pipeline_rx) = channel::<Message>(8);
 
-        let control_tx = MetricsInstance::new(cfg).launch(pipeline_tx).await.unwrap();
+        let runtime = MetricsInstance::new(cfg).launch(pipeline_tx).await.unwrap();
 
         let message = timeout(Duration::from_secs(4), pipeline_rx.recv())
             .await
@@ -529,7 +527,8 @@ mod tests {
             other => panic!("expected data message, got {other:?}"),
         }
 
-        control_tx.send(Message::Stop).await.unwrap();
+        runtime.tx.send(Message::Stop).await.unwrap();
+        runtime.task.await.unwrap();
     }
 
     #[test]

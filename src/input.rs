@@ -23,6 +23,7 @@ mod shell;
 
 use crate::cfg::{find_keyed_entry, parse_entry};
 use crate::message::Message;
+use crate::runtime::ComponentRuntime;
 use anyhow::{Error, bail};
 use async_trait::async_trait;
 use log::debug;
@@ -31,7 +32,7 @@ use toml::Value;
 
 #[async_trait]
 pub trait InputLauncher: Send + Sync {
-    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<Sender<Message>, Error>;
+    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<ComponentRuntime, Error>;
 }
 
 pub struct InputBuilder;
@@ -46,7 +47,7 @@ impl InputBuilder {
         config: &Value,
         input_name: &str,
         pipeline_tx: Sender<Message>,
-    ) -> Result<Sender<Message>, Error> {
+    ) -> Result<ComponentRuntime, Error> {
         let (input_type, input_table) = find_keyed_entry(config, "inputs", input_name)?;
         debug!(
             "Selected input '{}' from dynamic section type '{}'",

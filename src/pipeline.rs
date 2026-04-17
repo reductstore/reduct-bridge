@@ -14,6 +14,7 @@
 use crate::input::InputBuilder;
 use crate::message::{Message, Record};
 use crate::remote::RemoteBuilder;
+use crate::runtime::ComponentRuntime;
 use anyhow::{Context, Error, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
@@ -79,7 +80,7 @@ struct PipelineConfig {
 
 #[async_trait]
 pub trait PipelineLauncher: Send + Sync {
-    async fn launch(&self, remote_tx: Sender<Message>) -> Result<Sender<Message>, Error>;
+    async fn launch(&self, remote_tx: Sender<Message>) -> Result<ComponentRuntime, Error>;
     fn input_names(&self) -> &[String];
 }
 
@@ -204,7 +205,7 @@ fn apply_label_rules(record: &mut Record, rules: &mut [PipelineLabelRuleRuntime]
 
 #[async_trait]
 impl PipelineLauncher for PassthroughPipelineLauncher {
-    async fn launch(&self, remote_tx: Sender<Message>) -> Result<Sender<Message>, Error> {
+    async fn launch(&self, remote_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
         let pipeline_name = self.pipeline_name.clone();
         let preprocess_keys: Vec<String> = self.preprocess.keys().cloned().collect();
@@ -221,7 +222,7 @@ impl PipelineLauncher for PassthroughPipelineLauncher {
             preprocess_keys.len(),
             label_rules.len()
         );
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             debug!(
                 "Pipeline worker started for '{}' preprocess fields: {:?} label rules: {}",
                 pipeline_name,
@@ -230,29 +231,34 @@ impl PipelineLauncher for PassthroughPipelineLauncher {
             );
 
             while let Some(message) = rx.recv().await {
-                let outbound = match message {
+                match message {
                     Message::Data(mut record) => {
                         apply_label_rules(&mut record, &mut label_rules);
-                        Message::Data(record)
+                        if let Err(err) = remote_tx.send(Message::Data(record)).await {
+                            warn!(
+                                "Failed to forward message from pipeline '{}' to remote: {}",
+                                pipeline_name, err
+                            );
+                        }
                     }
-                    other => other,
-                };
-
-                if let Err(err) = remote_tx.send(outbound.clone()).await {
-                    warn!(
-                        "Failed to forward message from pipeline '{}' to remote: {}",
-                        pipeline_name, err
-                    );
-                }
-
-                if matches!(outbound, Message::Stop) {
-                    info!("Stop received, shutting down pipeline '{}'", pipeline_name);
-                    break;
+                    #[cfg(any(feature = "ros1", feature = "ros2"))]
+                    Message::Attachment(attachment) => {
+                        if let Err(err) = remote_tx.send(Message::Attachment(attachment)).await {
+                            warn!(
+                                "Failed to forward message from pipeline '{}' to remote: {}",
+                                pipeline_name, err
+                            );
+                        }
+                    }
+                    Message::Stop => {
+                        info!("Stop received, shutting down pipeline '{}'", pipeline_name);
+                        break;
+                    }
                 }
             }
         });
 
-        Ok(tx)
+        Ok(ComponentRuntime { tx, task })
     }
 
     fn input_names(&self) -> &[String] {
@@ -261,22 +267,38 @@ impl PipelineLauncher for PassthroughPipelineLauncher {
 }
 
 pub struct PipelineRuntime {
-    input_txs: Vec<Sender<Message>>,
-    pipeline_txs: Vec<Sender<Message>>,
-    remote_txs: Vec<Sender<Message>>,
+    inputs: Vec<ComponentRuntime>,
+    input_routers: Vec<ComponentRuntime>,
+    pipelines: Vec<ComponentRuntime>,
+    remotes: Vec<ComponentRuntime>,
 }
 
 impl PipelineRuntime {
-    pub async fn stop(&self) {
-        for tx in &self.input_txs {
-            let _ = tx.send(Message::Stop).await;
+    async fn stop_stage(stage: Vec<ComponentRuntime>) {
+        let mut pending = stage;
+        for component in &pending {
+            if let Err(err) = component.tx.send(Message::Stop).await {
+                debug!("Failed to send stop to component: {}", err);
+            }
         }
-        for tx in &self.pipeline_txs {
-            let _ = tx.send(Message::Stop).await;
+
+        while let Some(component) = pending.pop() {
+            match component.task.await {
+                Ok(()) => {
+                    debug!("Component stopped cleanly");
+                }
+                Err(err) => {
+                    warn!("Component failed during shutdown: {}", err);
+                }
+            }
         }
-        for tx in &self.remote_txs {
-            let _ = tx.send(Message::Stop).await;
-        }
+    }
+
+    pub async fn stop(self) {
+        Self::stop_stage(self.inputs).await;
+        Self::stop_stage(self.input_routers).await;
+        Self::stop_stage(self.pipelines).await;
+        Self::stop_stage(self.remotes).await;
     }
 }
 
@@ -297,21 +319,21 @@ impl PipelineBuilder {
         info!("Discovered {} pipeline entries", pipeline_configs.len());
 
         let mut remote_txs_by_name: HashMap<String, Sender<Message>> = HashMap::new();
-        let mut remote_txs: Vec<Sender<Message>> = Vec::new();
+        let mut remotes: Vec<ComponentRuntime> = Vec::new();
         let mut remote_names: HashSet<String> = HashSet::new();
         for cfg in &pipeline_configs {
             remote_names.insert(cfg.remote.clone());
         }
 
         for remote_name in remote_names {
-            let remote_tx = remote_builder.build(config, &remote_name).await?;
+            let remote = remote_builder.build(config, &remote_name).await?;
             info!("Remote '{}' launcher started", remote_name);
-            remote_txs.push(remote_tx.clone());
-            remote_txs_by_name.insert(remote_name, remote_tx);
+            remote_txs_by_name.insert(remote_name, remote.tx.clone());
+            remotes.push(remote);
         }
 
         let mut pipeline_routes: HashMap<String, Vec<Sender<Message>>> = HashMap::new();
-        let mut pipeline_txs: Vec<Sender<Message>> = Vec::new();
+        let mut pipelines: Vec<ComponentRuntime> = Vec::new();
 
         for cfg in &pipeline_configs {
             let remote_tx = remote_txs_by_name
@@ -330,17 +352,18 @@ impl PipelineBuilder {
                 cfg.labels.clone(),
                 cfg.preprocess.clone(),
             );
-            let pipeline_tx = launcher.launch(remote_tx).await?;
-            pipeline_txs.push(pipeline_tx.clone());
+            let pipeline = launcher.launch(remote_tx).await?;
             for input_name in launcher.input_names() {
                 pipeline_routes
                     .entry(input_name.clone())
                     .or_default()
-                    .push(pipeline_tx.clone());
+                    .push(pipeline.tx.clone());
             }
+            pipelines.push(pipeline);
         }
 
-        let mut input_txs: Vec<Sender<Message>> = Vec::new();
+        let mut inputs: Vec<ComponentRuntime> = Vec::new();
+        let mut input_routers: Vec<ComponentRuntime> = Vec::new();
         let mut input_names: HashSet<String> = HashSet::new();
         for cfg in &pipeline_configs {
             for input_name in &cfg.inputs {
@@ -357,36 +380,46 @@ impl PipelineBuilder {
                 );
             }
 
-            let (fanout_tx, mut fanout_rx) = channel::<Message>(CHANNEL_SIZE);
+            let (input_router_tx, mut input_router_rx) = channel::<Message>(CHANNEL_SIZE);
             let route_name = input_name.clone();
-            tokio::spawn(async move {
-                debug!("Fan-out worker started for input '{}'", route_name);
-                while let Some(message) = fanout_rx.recv().await {
-                    for tx in &route_txs {
-                        if let Err(err) = tx.send(message.clone()).await {
-                            warn!(
-                                "Failed to route message from input '{}' to pipeline: {}",
-                                route_name, err
-                            );
+            let input_router_task = tokio::spawn(async move {
+                debug!("Input router started for input '{}'", route_name);
+                while let Some(message) = input_router_rx.recv().await {
+                    match message {
+                        Message::Stop => {
+                            info!("Input router for input '{}' stopping", route_name);
+                            break;
                         }
-                    }
-
-                    if matches!(message, Message::Stop) {
-                        info!("Fan-out worker for input '{}' stopping", route_name);
-                        break;
+                        other => {
+                            for tx in &route_txs {
+                                if let Err(err) = tx.send(other.clone()).await {
+                                    warn!(
+                                        "Failed to route message from input '{}' to pipeline: {}",
+                                        route_name, err
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
             });
+            input_routers.push(ComponentRuntime {
+                tx: input_router_tx.clone(),
+                task: input_router_task,
+            });
 
-            let input_tx = input_builder.build(config, &input_name, fanout_tx).await?;
+            let input = input_builder
+                .build(config, &input_name, input_router_tx)
+                .await?;
             info!("Input '{}' launcher started", input_name);
-            input_txs.push(input_tx);
+            inputs.push(input);
         }
 
         Ok(PipelineRuntime {
-            input_txs,
-            pipeline_txs,
-            remote_txs,
+            inputs,
+            input_routers,
+            pipelines,
+            remotes,
         })
     }
 }
@@ -428,4 +461,130 @@ fn parse_pipeline_configs(config: &Value) -> Result<Vec<NamedPipelineConfig>, Er
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PipelineRuntime;
+    use crate::message::Message;
+    use crate::runtime::ComponentRuntime;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::mpsc::channel;
+    use tokio::time::{Duration, sleep, timeout};
+
+    fn delayed_component(delay: Duration, completed: Arc<AtomicBool>) -> ComponentRuntime {
+        let (tx, mut rx) = channel::<Message>(8);
+        let task = tokio::spawn(async move {
+            while let Some(message) = rx.recv().await {
+                if matches!(message, Message::Stop) {
+                    sleep(delay).await;
+                    completed.store(true, Ordering::SeqCst);
+                    break;
+                }
+            }
+        });
+
+        ComponentRuntime { tx, task }
+    }
+
+    #[tokio::test]
+    async fn stop_waits_for_component_completion() {
+        let completed = Arc::new(AtomicBool::new(false));
+        let runtime = PipelineRuntime {
+            inputs: vec![delayed_component(
+                Duration::from_millis(150),
+                Arc::clone(&completed),
+            )],
+            input_routers: vec![],
+            pipelines: vec![],
+            remotes: vec![],
+        };
+
+        let stop_task = tokio::spawn(async move {
+            runtime.stop().await;
+        });
+        tokio::pin!(stop_task);
+
+        assert!(
+            timeout(Duration::from_millis(50), &mut stop_task)
+                .await
+                .is_err(),
+            "shutdown should still be waiting for component completion"
+        );
+        assert!(
+            !completed.load(Ordering::SeqCst),
+            "component should not have finished yet"
+        );
+
+        timeout(Duration::from_millis(300), &mut stop_task)
+            .await
+            .expect("shutdown should complete after component finishes")
+            .expect("shutdown task should finish cleanly");
+        assert!(
+            completed.load(Ordering::SeqCst),
+            "component should complete before shutdown returns"
+        );
+    }
+
+    fn ordered_component(
+        name: &'static str,
+        delay: Duration,
+        events: Arc<Mutex<Vec<&'static str>>>,
+    ) -> ComponentRuntime {
+        let (tx, mut rx) = channel::<Message>(8);
+        let task = tokio::spawn(async move {
+            while let Some(message) = rx.recv().await {
+                if matches!(message, Message::Stop) {
+                    events.lock().expect("events lock").push(match name {
+                        "input" => "input_stop_received",
+                        "pipeline" => "pipeline_stop_received",
+                        _ => "unknown_stop_received",
+                    });
+                    sleep(delay).await;
+                    events.lock().expect("events lock").push(match name {
+                        "input" => "input_completed",
+                        "pipeline" => "pipeline_completed",
+                        _ => "unknown_completed",
+                    });
+                    break;
+                }
+            }
+        });
+
+        ComponentRuntime { tx, task }
+    }
+
+    #[tokio::test]
+    async fn stop_shuts_down_stages_in_order() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let runtime = PipelineRuntime {
+            inputs: vec![ordered_component(
+                "input",
+                Duration::from_millis(100),
+                Arc::clone(&events),
+            )],
+            input_routers: vec![],
+            pipelines: vec![ordered_component(
+                "pipeline",
+                Duration::from_millis(10),
+                Arc::clone(&events),
+            )],
+            remotes: vec![],
+        };
+
+        runtime.stop().await;
+
+        let events = events.lock().expect("events lock");
+        assert_eq!(
+            events.as_slice(),
+            [
+                "input_stop_received",
+                "input_completed",
+                "pipeline_stop_received",
+                "pipeline_completed",
+            ]
+        );
+    }
 }
