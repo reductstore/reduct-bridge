@@ -31,8 +31,7 @@ use log::info;
 async fn wait_for_shutdown_signal() -> anyhow::Result<&'static str> {
     use tokio::signal::unix::{SignalKind, signal};
 
-    let mut sigterm =
-        signal(SignalKind::terminate()).context("Failed to listen for SIGTERM")?;
+    let mut sigterm = signal(SignalKind::terminate()).context("Failed to listen for SIGTERM")?;
 
     tokio::select! {
         result = tokio::signal::ctrl_c() => {
