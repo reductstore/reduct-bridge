@@ -20,6 +20,8 @@ mod ros1;
 mod ros2;
 #[cfg(feature = "shell")]
 mod shell;
+#[cfg(feature = "mqtt")]
+mod mqtt;
 
 use crate::cfg::{find_keyed_entry, parse_entry};
 use crate::message::Message;
@@ -82,6 +84,10 @@ impl InputBuilder {
                 debug!("Creating metrics launcher for input '{}'", input_name);
                 let launcher = metrics::MetricsInstance::new(input_cfg);
                 launcher.launch(pipeline_tx).await
+            }
+            #cfg(feature = "mqtt")]
+            "mqtt" => {
+                // placeholder for MQTT input type
             }
             _ => bail!(
                 "Unsupported input type '{}' for input '{}'",
