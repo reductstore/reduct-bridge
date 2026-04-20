@@ -85,9 +85,12 @@ impl InputBuilder {
                 let launcher = metrics::MetricsInstance::new(input_cfg);
                 launcher.launch(pipeline_tx).await
             }
-            #cfg(feature = "mqtt")]
+            #[cfg(feature = "mqtt")]
             "mqtt" => {
-                // placeholder for MQTT input type
+                let input_cfg: mqtt::MqttConfig = parse_entry(input_table)?;
+                debug!("Creating MQTT launcher for input '{}'", input_name);
+                let launcher = mqtt::MqttInstance::new(input_cfg);
+                launcher.launch(pipeline_tx).await
             }
             _ => bail!(
                 "Unsupported input type '{}' for input '{}'",
