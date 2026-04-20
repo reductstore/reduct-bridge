@@ -36,6 +36,7 @@ rosrust = { version = "0.9.13", optional = true, git = "https://github.com/reduc
 rclrs = { git = "https://github.com/reductstore/ros2_rust", optional = true, version = "0.7.0" }
 ros2_message = { git = "https://github.com/reductstore/ros2_message", optional = true, version = "0.1.1" }
 systemstat = { version = "0.2.6", optional = true }
+rumqttc = "0.25.1"
 
 [dev-dependencies]
 rstest = "0.25.0"
