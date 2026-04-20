@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rumqttc::AsyncClient;
-use rumqttc::v5::AsyncClient as AsyncClientV5;
+mod input;
 
-pub struct MqqtConfig {
-    pub broker: String,
-}
+pub use input::{MqttConfig, MqttInstance};
