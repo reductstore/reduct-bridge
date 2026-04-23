@@ -14,14 +14,14 @@
 
 #[cfg(feature = "metrics")]
 mod metrics;
+#[cfg(feature = "mqtt")]
+mod mqtt;
 #[cfg(feature = "ros1")]
 mod ros1;
 #[cfg(feature = "ros2")]
 mod ros2;
 #[cfg(feature = "shell")]
 mod shell;
-#[cfg(feature = "mqtt")]
-mod mqtt;
 
 use crate::cfg::{find_keyed_entry, parse_entry};
 use crate::message::Message;
