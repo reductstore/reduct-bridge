@@ -1,4 +1,3 @@
-
 // Copyright 2026 ReductSoftware UG
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -59,10 +58,26 @@ impl MqttInstance {
     }
 }
 
+fn validate_config(cfg: &MqttConfig) -> Result<(), Error> {
+    if cfg.broker.is_empty() {
+        bail!("Broker address is required");
+    }
+    if cfg.client_id.is_empty() {
+        bail!("Client ID is required");
+    }
+    if cfg.topics.is_empty() {
+        bail!("At least one topic is required");
+    }
+    if cfg.qos > 2 {
+        bail!("QoS must be 0, 1, or 2");
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl InputLauncher for MqttInstance {
     async fn launch(&self, _pipeline_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
         let _cfg = &self.cfg;
-        bail!("MQTT input is not implemented yet");
+        validate_config(_cfg)?;
     }
 }
