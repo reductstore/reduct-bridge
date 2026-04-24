@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Hardened GitHub Actions token permissions by removing global `id-token: write` and keeping elevated `contents: write` only on release/upload jobs.
-
 ## 0.1.2 - 2026-03-30
 
 ### Added
