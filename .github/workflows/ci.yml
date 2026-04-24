@@ -16,7 +16,6 @@ on:
       - CHANGELOG.md
 
 permissions:
-  id-token: write
   contents: read
 
 
