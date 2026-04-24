@@ -53,6 +53,19 @@ pub struct MqttConfig {
     pub property_labels: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedBroker {
+    scheme: BrokerScheme,
+    host: String,
+    port: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrokerScheme {
+    Mqtt,
+    Mqtts,
+}
+
 pub struct MqttInstance {
     cfg: MqttConfig,
 }
@@ -118,6 +131,61 @@ impl MqttInstance {
     }
 }
 
+fn parse_broker(broker: &str) -> Result<ParsedBroker> {
+    let url = url::Url::parse(broker).map_err(|e| {
+        let message = e.to_string();
+        if message.contains("empty host") {
+            anyhow::anyhow!("MQTT broker URL must have a host")
+        } else {
+            anyhow::anyhow!("Invalid MQTT broker URL: {message}")
+        }
+    })?;
+
+    let scheme = match url.scheme() {
+        "mqtt" => BrokerScheme::Mqtt,
+        "mqtts" => BrokerScheme::Mqtts,
+        _ => bail!("Unsupported MQTT broker scheme: {}", url.scheme()),
+    };
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow::anyhow!("MQTT broker URL must have a host"))?
+        .to_string();
+    let port = url.port().unwrap_or(match scheme {
+        BrokerScheme::Mqtt => 1883,
+        BrokerScheme::Mqtts => 8883,
+    });
+
+    Ok(ParsedBroker { scheme, host, port })
+}
+
+fn mqtt_qos(qos: u8) -> Result<rumqttc::QoS> {
+    match qos {
+        0 => Ok(rumqttc::QoS::AtMostOnce),
+        1 => Ok(rumqttc::QoS::AtLeastOnce),
+        2 => Ok(rumqttc::QoS::ExactlyOnce),
+        _ => bail!("Invalid MQTT QoS level: {}", qos),
+    }
+}
+
+fn build_v3_options(cfg: &MqttConfig, broker: &ParsedBroker) -> rumqttc::MqttOptions {
+    let mut options = rumqttc::MqttOptions::new(&cfg.client_id, &broker.host, broker.port);
+    options.set_keep_alive(std::time::Duration::from_secs(30));
+    if let Some(username) = &cfg.username {
+        options.set_credentials(username, cfg.password.as_deref().unwrap_or(""));
+    }
+    options
+}
+
+fn build_v5_options(cfg: &MqttConfig, broker: &ParsedBroker) -> rumqttc::v5::MqttOptions {
+    let mut options = rumqttc::v5::MqttOptions::new(&cfg.client_id, &broker.host, broker.port);
+    options.set_keep_alive(std::time::Duration::from_secs(30));
+    if let Some(username) = &cfg.username {
+        options.set_credentials(username, cfg.password.as_deref().unwrap_or(""));
+    }
+    options
+}
+
 #[async_trait]
 impl InputLauncher for MqttInstance {
     async fn launch(&self, _pipeline_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
@@ -131,6 +199,19 @@ impl InputLauncher for MqttInstance {
             cfg.client_id
         );
 
+        let broker = parse_broker(&cfg.broker)?;
+        let qos = mqtt_qos(cfg.qos)?;
+
+        match cfg.version {
+            MqttVersion::V3 => {
+                info!("Using MQTT version 3.1.1");
+                let _options = build_v3_options(&cfg, &broker);
+            }
+            MqttVersion::V5 => {
+                info!("Using MQTT version 5.0");
+                let _options = build_v5_options(&cfg, &broker);
+            }
+        }
         let _channel_size = CHANNEL_SIZE;
         bail!("MQTT input is not implemented yet");
     }
@@ -138,7 +219,7 @@ impl InputLauncher for MqttInstance {
 
 #[cfg(test)]
 mod tests {
-    use super::{MqttConfig, MqttInstance, MqttVersion};
+    use super::{BrokerScheme, MqttConfig, MqttInstance, MqttVersion, mqtt_qos, parse_broker};
     use std::collections::HashMap;
 
     fn mqtt_cfg() -> MqttConfig {
@@ -226,5 +307,60 @@ mod tests {
         );
         assert_eq!(MqttInstance::entry_name("", "/factory/a"), "factory/a");
         assert_eq!(MqttInstance::entry_name("/mqtt/", ""), "mqtt");
+    }
+
+    #[test]
+    fn parses_mqtt_broker_with_default_port() {
+        let broker = parse_broker("mqtt://localhost").unwrap();
+
+        assert_eq!(broker.scheme, BrokerScheme::Mqtt);
+        assert_eq!(broker.host, "localhost");
+        assert_eq!(broker.port, 1883);
+    }
+
+    #[test]
+    fn parses_mqtt_broker_with_explicit_port() {
+        let broker = parse_broker("mqtt://localhost:1884").unwrap();
+
+        assert_eq!(broker.scheme, BrokerScheme::Mqtt);
+        assert_eq!(broker.host, "localhost");
+        assert_eq!(broker.port, 1884);
+    }
+
+    #[test]
+    fn parses_mqtts_broker_with_default_port() {
+        let broker = parse_broker("mqtts://broker.example.com").unwrap();
+
+        assert_eq!(broker.scheme, BrokerScheme::Mqtts);
+        assert_eq!(broker.host, "broker.example.com");
+        assert_eq!(broker.port, 8883);
+    }
+
+    #[test]
+    fn rejects_unsupported_broker_scheme() {
+        let err = parse_broker("http://localhost").unwrap_err().to_string();
+
+        assert!(err.contains("Unsupported MQTT broker scheme"));
+    }
+
+    #[test]
+    fn rejects_broker_without_host() {
+        let err = parse_broker("mqtt://:1883").unwrap_err().to_string();
+
+        assert!(err.contains("must have a host"));
+    }
+
+    #[test]
+    fn converts_qos_levels() {
+        assert_eq!(mqtt_qos(0).unwrap(), rumqttc::QoS::AtMostOnce);
+        assert_eq!(mqtt_qos(1).unwrap(), rumqttc::QoS::AtLeastOnce);
+        assert_eq!(mqtt_qos(2).unwrap(), rumqttc::QoS::ExactlyOnce);
+    }
+
+    #[test]
+    fn rejects_invalid_qos_level() {
+        let err = mqtt_qos(3).unwrap_err().to_string();
+
+        assert!(err.contains("Invalid MQTT QoS level"));
     }
 }
