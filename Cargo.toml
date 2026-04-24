@@ -6,11 +6,12 @@ edition = "2024"
 
 [features]
 default = ["shell"]
-all-inputs = ["shell", "ros1", "ros2", "metrics"]
+all-inputs = ["shell", "ros1", "ros2", "metrics", "mqtt"]
 ros1 = ["dep:rosrust"]
 ros2 = ["dep:rclrs", "dep:ros2_message"]
 shell = []
 metrics = ["dep:systemstat"]
+mqtt = ["dep:rumqttc"]
 ci = []
 
 
@@ -32,10 +33,12 @@ log = "0.4.28"
 env_logger = "0.11.8"
 regex = "1.12.2"
 serde_json = "1.0.145"
+url = "2.5.7"
 rosrust = { version = "0.9.13", optional = true, git = "https://github.com/reductstore/rosrust.git", tag = "v0.9.13" }
 rclrs = { git = "https://github.com/reductstore/ros2_rust", optional = true, version = "0.7.0" }
 ros2_message = { git = "https://github.com/reductstore/ros2_message", optional = true, version = "0.1.1" }
 systemstat = { version = "0.2.6", optional = true }
+rumqttc = { version = "0.25.1", optional = true }
 
 [dev-dependencies]
 rstest = "0.25.0"
