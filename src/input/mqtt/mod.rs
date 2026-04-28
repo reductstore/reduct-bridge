@@ -13,15 +13,16 @@
 // limitations under the License.
 
 use crate::input::InputLauncher;
-use crate::message::Message;
+use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
-use log::info;
+use crate::formats::json::{extract_json_path, value_to_label};
+use log::{debug, info, warn};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Sender, channel};
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -159,11 +160,82 @@ fn parse_broker(broker: &str) -> Result<ParsedBroker> {
     Ok(ParsedBroker { scheme, host, port })
 }
 
+fn build_payload_labels(cfg: &MqttConfig, payload: &[u8]) -> HashMap<String, String> {
+    let mut labels = HashMap::new();
+    let json = serde_json::from_slice::<serde_json::Value>(payload).ok();
+
+    for (label_name, rule) in &cfg.labels {
+        if let Some(path) = rule.strip_prefix("$.") {
+            if let Some(json) = &json {
+                if let Some(value) = extract_json_path(json, path) {
+                    labels.insert(label_name.clone(), value_to_label(value));
+                }
+            }
+        } else {
+            labels.insert(label_name.clone(), rule.clone());
+        }
+    }
+
+    labels
+}
+
+fn build_v5_property_labels(
+    cfg: &MqttConfig,
+    publish: &rumqttc::v5::mqttbytes::v5::Publish,
+) -> HashMap<String, String> {
+    let mut labels = HashMap::new();
+    let Some(properties) = &publish.properties else {
+        return labels;
+    };
+
+    for (label_name, rule) in &cfg.property_labels {
+        match rule.as_str() {
+            "response_topic" => {
+                if let Some(value) = &properties.response_topic {
+                    labels.insert(label_name.clone(), value.clone());
+                }
+            }
+            "content_type" => {
+                if let Some(value) = &properties.content_type {
+                    labels.insert(label_name.clone(), value.clone());
+                }
+            }
+            "correlation_data" => {
+                if let Some(value) = &properties.correlation_data {
+                    labels.insert(label_name.clone(), String::from_utf8_lossy(value).to_string());
+                }
+            }
+            user_key if user_key.starts_with("user.") => {
+                let expected_key = &user_key["user.".len()..];
+                if let Some((_, value)) = properties
+                    .user_properties
+                    .iter()
+                    .find(|(key, _)| key == expected_key)
+                {
+                    labels.insert(label_name.clone(), value.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    labels
+}
+
 fn mqtt_qos(qos: u8) -> Result<rumqttc::QoS> {
     match qos {
         0 => Ok(rumqttc::QoS::AtMostOnce),
         1 => Ok(rumqttc::QoS::AtLeastOnce),
         2 => Ok(rumqttc::QoS::ExactlyOnce),
+        _ => bail!("Invalid MQTT QoS level: {}", qos),
+    }
+}
+
+fn mqtt_v5_qos(qos: u8) -> Result<rumqttc::v5::mqttbytes::QoS> {
+    match qos {
+        0 => Ok(rumqttc::v5::mqttbytes::QoS::AtMostOnce),
+        1 => Ok(rumqttc::v5::mqttbytes::QoS::AtLeastOnce),
+        2 => Ok(rumqttc::v5::mqttbytes::QoS::ExactlyOnce),
         _ => bail!("Invalid MQTT QoS level: {}", qos),
     }
 }
@@ -186,9 +258,130 @@ fn build_v5_options(cfg: &MqttConfig, broker: &ParsedBroker) -> rumqttc::v5::Mqt
     options
 }
 
+fn build_v3_record(cfg: &MqttConfig, publish: &rumqttc::Publish) -> Record {
+    Record {
+        timestamp_us: MqttInstance::current_timestamp_us(),
+        entry_name: MqttInstance::entry_name(&cfg.entry_prefix, &publish.topic),
+        content: publish.payload.clone(),
+        content_type: None,
+        labels: build_payload_labels(cfg, publish.payload.as_ref()),
+    }
+}
+
+async fn launch_v3(
+    cfg: MqttConfig,
+    broker: ParsedBroker,
+    qos: rumqttc::QoS,
+    pipeline_tx: Sender<Message>,
+) -> Result<ComponentRuntime, Error> {
+    let options = build_v3_options(&cfg, &broker);
+    let (client, mut eventloop) = rumqttc::AsyncClient::new(options, CHANNEL_SIZE);
+
+    for topic in &cfg.topics {
+        client
+            .subscribe(topic, qos)
+            .await
+            .map_err(|err| anyhow::anyhow!("Failed to subscribe to MQTT topic '{}': {}", topic, err))?;
+    }
+
+    let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                maybe_message = rx.recv() => {
+                    match maybe_message {
+                        Some(Message::Stop) => {
+                            info!("Stop message received, shutting down MQTT v3 worker");
+                            break;
+                        }
+                        Some(other) => {
+                            debug!("Ignoring unsupported control message in MQTT v3 input: {:?}", other);
+                        }
+                        None => {
+                            info!("MQTT v3 control channel closed, shutting down worker");
+                            break;
+                        }
+                    }
+                }
+                event = eventloop.poll() => {
+                    match event {
+                        Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish))) => {
+                            debug!("Received MQTT v3 publish on topic '{}'", publish.topic);
+                            let record = build_v3_record(&cfg, &publish);
+                            if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
+                                warn!("Failed to send MQTT v3 record to pipeline: {}", err);
+                            }
+                        }
+                        Ok(other) => {
+                            debug!("Ignoring MQTT v3 event: {:?}", other);
+                        }
+                        Err(err) => {
+                            warn!("MQTT v3 event loop error: {}", err);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(ComponentRuntime { tx, task })
+}
+
+async fn launch_v5(
+    cfg: MqttConfig,
+    broker: ParsedBroker,
+    qos: rumqttc::v5::mqttbytes::QoS,
+    _pipeline_tx: Sender<Message>,
+) -> Result<ComponentRuntime, Error> {
+    let options = build_v5_options(&cfg, &broker);
+    let (client, mut eventloop) = rumqttc::v5::AsyncClient::new(options, CHANNEL_SIZE);
+
+    for topic in &cfg.topics {
+        client
+            .subscribe(topic, qos)
+            .await
+            .map_err(|err| anyhow::anyhow!("Failed to subscribe to MQTT v5 topic '{}': {}", topic, err))?;
+    }
+
+    let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                maybe_message = rx.recv() => {
+                    match maybe_message {
+                        Some(Message::Stop) => {
+                            info!("Stop message received, shutting down MQTT v5 worker");
+                            break;
+                        }
+                        Some(other) => {
+                            debug!("Ignoring unsupported control message in MQTT v5 input: {:?}", other);
+                        }
+                        None => {
+                            info!("MQTT v5 control channel closed, shutting down worker");
+                            break;
+                        }
+                    }
+                }
+                event = eventloop.poll() => {
+                    match event {
+                        Ok(event) => {
+                            debug!("MQTT v5 event: {:?}", event);
+                        }
+                        Err(err) => {
+                            warn!("MQTT v5 event loop error: {}", err);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(ComponentRuntime { tx, task })
+}
+
 #[async_trait]
 impl InputLauncher for MqttInstance {
-    async fn launch(&self, _pipeline_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
+    async fn launch(&self, pipeline_tx: Sender<Message>) -> Result<ComponentRuntime, Error> {
         let cfg = self.cfg.clone();
         Self::validate_config(&cfg)?;
 
@@ -200,26 +393,30 @@ impl InputLauncher for MqttInstance {
         );
 
         let broker = parse_broker(&cfg.broker)?;
-        let qos = mqtt_qos(cfg.qos)?;
 
         match cfg.version {
             MqttVersion::V3 => {
                 info!("Using MQTT version 3.1.1");
-                let _options = build_v3_options(&cfg, &broker);
+                let qos = mqtt_qos(cfg.qos)?;
+                launch_v3(cfg, broker, qos, pipeline_tx).await
             }
             MqttVersion::V5 => {
                 info!("Using MQTT version 5.0");
-                let _options = build_v5_options(&cfg, &broker);
+                let qos = mqtt_v5_qos(cfg.qos)?;
+                launch_v5(cfg, broker, qos, pipeline_tx).await
             }
         }
-        let _channel_size = CHANNEL_SIZE;
-        bail!("MQTT input is not implemented yet");
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{BrokerScheme, MqttConfig, MqttInstance, MqttVersion, mqtt_qos, parse_broker};
+    use super::{
+        BrokerScheme, MqttConfig, MqttInstance, MqttVersion, build_payload_labels,
+        build_v3_record, build_v5_property_labels, mqtt_qos, parse_broker,
+    };
+    use bytes::Bytes;
+    use rumqttc::v5::mqttbytes::v5::{Publish as V5Publish, PublishProperties};
     use std::collections::HashMap;
 
     fn mqtt_cfg() -> MqttConfig {
@@ -362,5 +559,93 @@ mod tests {
         let err = mqtt_qos(3).unwrap_err().to_string();
 
         assert!(err.contains("Invalid MQTT QoS level"));
+    }
+
+    #[test]
+    fn builds_payload_labels_from_static_and_json_rules() {
+        let mut cfg = mqtt_cfg();
+        cfg.labels = HashMap::from([
+            ("device".to_string(), "$.device_id".to_string()),
+            ("site".to_string(), "$.site".to_string()),
+            ("source".to_string(), "mqtt".to_string()),
+        ]);
+
+        let labels = build_payload_labels(&cfg, br#"{"device_id":"dev-1","site":"lab"}"#);
+
+        assert_eq!(labels.get("device"), Some(&"dev-1".to_string()));
+        assert_eq!(labels.get("site"), Some(&"lab".to_string()));
+        assert_eq!(labels.get("source"), Some(&"mqtt".to_string()));
+    }
+
+    #[test]
+    fn skips_json_labels_when_payload_is_not_json() {
+        let mut cfg = mqtt_cfg();
+        cfg.labels = HashMap::from([
+            ("device".to_string(), "$.device_id".to_string()),
+            ("source".to_string(), "mqtt".to_string()),
+        ]);
+
+        let labels = build_payload_labels(&cfg, b"plain text payload");
+
+        assert_eq!(labels.get("device"), None);
+        assert_eq!(labels.get("source"), Some(&"mqtt".to_string()));
+    }
+
+    #[test]
+    fn builds_v3_record_with_entry_name_payload_and_labels() {
+        let mut cfg = mqtt_cfg();
+        cfg.entry_prefix = "/mqtt".to_string();
+        cfg.labels = HashMap::from([
+            ("device".to_string(), "$.device_id".to_string()),
+            ("source".to_string(), "mqtt".to_string()),
+        ]);
+
+        let publish = rumqttc::Publish {
+            dup: false,
+            qos: rumqttc::QoS::AtMostOnce,
+            retain: false,
+            topic: "factory/device-1".to_string(),
+            pkid: 0,
+            payload: Bytes::from_static(br#"{"device_id":"dev-1"}"#),
+        };
+
+        let record = build_v3_record(&cfg, &publish);
+
+        assert_eq!(record.entry_name, "mqtt/factory/device-1");
+        assert_eq!(record.content, Bytes::from_static(br#"{"device_id":"dev-1"}"#));
+        assert_eq!(record.content_type, None);
+        assert_eq!(record.labels.get("device"), Some(&"dev-1".to_string()));
+        assert_eq!(record.labels.get("source"), Some(&"mqtt".to_string()));
+    }
+
+    #[test]
+    fn builds_v5_property_labels_from_known_properties() {
+        let mut cfg = mqtt_cfg();
+        cfg.property_labels = HashMap::from([
+            ("reply".to_string(), "response_topic".to_string()),
+            ("mime".to_string(), "content_type".to_string()),
+            ("corr".to_string(), "correlation_data".to_string()),
+            ("tenant".to_string(), "user.tenant".to_string()),
+        ]);
+
+        let publish = V5Publish {
+            topic: Bytes::from_static(b"test/topic"),
+            payload: Bytes::from_static(b"{}"),
+            properties: Some(PublishProperties {
+                response_topic: Some("reply/topic".to_string()),
+                correlation_data: Some(Bytes::from_static(b"abc-123")),
+                user_properties: vec![("tenant".to_string(), "acme".to_string())],
+                content_type: Some("application/json".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let labels = build_v5_property_labels(&cfg, &publish);
+
+        assert_eq!(labels.get("reply"), Some(&"reply/topic".to_string()));
+        assert_eq!(labels.get("mime"), Some(&"application/json".to_string()));
+        assert_eq!(labels.get("corr"), Some(&"abc-123".to_string()));
+        assert_eq!(labels.get("tenant"), Some(&"acme".to_string()));
     }
 }
