@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::formats::json::{extract_json_path, value_to_label};
 use crate::input::InputLauncher;
 use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
-use crate::formats::json::{extract_json_path, value_to_label};
 use log::{debug, info, warn};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -202,7 +202,10 @@ fn build_v5_property_labels(
             }
             "correlation_data" => {
                 if let Some(value) = &properties.correlation_data {
-                    labels.insert(label_name.clone(), String::from_utf8_lossy(value).to_string());
+                    labels.insert(
+                        label_name.clone(),
+                        String::from_utf8_lossy(value).to_string(),
+                    );
                 }
             }
             user_key if user_key.starts_with("user.") => {
@@ -278,10 +281,9 @@ async fn launch_v3(
     let (client, mut eventloop) = rumqttc::AsyncClient::new(options, CHANNEL_SIZE);
 
     for topic in &cfg.topics {
-        client
-            .subscribe(topic, qos)
-            .await
-            .map_err(|err| anyhow::anyhow!("Failed to subscribe to MQTT topic '{}': {}", topic, err))?;
+        client.subscribe(topic, qos).await.map_err(|err| {
+            anyhow::anyhow!("Failed to subscribe to MQTT topic '{}': {}", topic, err)
+        })?;
     }
 
     let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
@@ -337,10 +339,9 @@ async fn launch_v5(
     let (client, mut eventloop) = rumqttc::v5::AsyncClient::new(options, CHANNEL_SIZE);
 
     for topic in &cfg.topics {
-        client
-            .subscribe(topic, qos)
-            .await
-            .map_err(|err| anyhow::anyhow!("Failed to subscribe to MQTT v5 topic '{}': {}", topic, err))?;
+        client.subscribe(topic, qos).await.map_err(|err| {
+            anyhow::anyhow!("Failed to subscribe to MQTT v5 topic '{}': {}", topic, err)
+        })?;
     }
 
     let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
@@ -412,8 +413,8 @@ impl InputLauncher for MqttInstance {
 #[cfg(test)]
 mod tests {
     use super::{
-        BrokerScheme, MqttConfig, MqttInstance, MqttVersion, build_payload_labels,
-        build_v3_record, build_v5_property_labels, mqtt_qos, parse_broker,
+        BrokerScheme, MqttConfig, MqttInstance, MqttVersion, build_payload_labels, build_v3_record,
+        build_v5_property_labels, mqtt_qos, parse_broker,
     };
     use bytes::Bytes;
     use rumqttc::v5::mqttbytes::v5::{Publish as V5Publish, PublishProperties};
@@ -612,7 +613,10 @@ mod tests {
         let record = build_v3_record(&cfg, &publish);
 
         assert_eq!(record.entry_name, "mqtt/factory/device-1");
-        assert_eq!(record.content, Bytes::from_static(br#"{"device_id":"dev-1"}"#));
+        assert_eq!(
+            record.content,
+            Bytes::from_static(br#"{"device_id":"dev-1"}"#)
+        );
         assert_eq!(record.content_type, None);
         assert_eq!(record.labels.get("device"), Some(&"dev-1".to_string()));
         assert_eq!(record.labels.get("source"), Some(&"mqtt".to_string()));
