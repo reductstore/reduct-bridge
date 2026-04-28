@@ -1977,6 +1977,7 @@ dependencies = [
  "rosrust",
  "rstest",
  "rumqttc",
+ "rustls",
  "serde",
  "serde_json",
  "systemstat",

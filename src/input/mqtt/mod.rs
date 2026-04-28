@@ -249,11 +249,19 @@ fn apply_v3_auth(options: &mut rumqttc::MqttOptions, cfg: &MqttConfig) {
     }
 }
 
+fn ensure_rustls_crypto_provider() {
+    static PROVIDER_INIT: std::sync::Once = std::sync::Once::new();
+    PROVIDER_INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 fn build_v3_options(cfg: &MqttConfig, broker: &ParsedBroker) -> rumqttc::MqttOptions {
     let mut options = rumqttc::MqttOptions::new(&cfg.client_id, &broker.host, broker.port);
     options.set_keep_alive(std::time::Duration::from_secs(30));
     apply_v3_auth(&mut options, cfg);
     if matches!(broker.scheme, BrokerScheme::Mqtts) {
+        ensure_rustls_crypto_provider();
         options.set_transport(rumqttc::Transport::tls_with_default_config());
     }
     options
@@ -270,6 +278,7 @@ fn build_v5_options(cfg: &MqttConfig, broker: &ParsedBroker) -> rumqttc::v5::Mqt
     options.set_keep_alive(std::time::Duration::from_secs(30));
     apply_v5_auth(&mut options, cfg);
     if matches!(broker.scheme, BrokerScheme::Mqtts) {
+        ensure_rustls_crypto_provider();
         options.set_transport(rumqttc::Transport::tls_with_default_config());
     }
     options

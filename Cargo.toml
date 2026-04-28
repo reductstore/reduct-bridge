@@ -11,7 +11,7 @@ ros1 = ["dep:rosrust"]
 ros2 = ["dep:rclrs", "dep:ros2_message"]
 shell = []
 metrics = ["dep:systemstat"]
-mqtt = ["dep:rumqttc"]
+mqtt = ["dep:rumqttc", "dep:rustls"]
 ci = []
 
 
@@ -39,6 +39,7 @@ rclrs = { git = "https://github.com/reductstore/ros2_rust", optional = true, ver
 ros2_message = { git = "https://github.com/reductstore/ros2_message", optional = true, version = "0.1.1" }
 systemstat = { version = "0.2.6", optional = true }
 rumqttc = { version = "0.25.1", optional = true }
+rustls = { version = "0.23.37", optional = true, features = ["ring"] }
 
 [dev-dependencies]
 rstest = "0.25.0"
