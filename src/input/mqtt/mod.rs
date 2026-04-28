@@ -109,29 +109,28 @@ impl MqttInstance {
 
         Ok(())
     }
+}
 
-    #[allow(dead_code)]
-    fn current_timestamp_us() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_micros() as u64
-    }
+fn current_timestamp_us() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64
+}
 
-    #[allow(dead_code)]
-    fn entry_name(prefix: &str, topic: &str) -> String {
-        let prefix = prefix.trim_matches('/');
-        let topic = topic.trim_matches('/');
-        if prefix.is_empty() {
-            topic.to_string()
-        } else if topic.is_empty() {
-            prefix.to_string()
-        } else {
-            format!("{prefix}/{topic}")
-        }
+fn entry_name(prefix: &str, topic: &str) -> String {
+    let prefix = prefix.trim_matches('/');
+    let topic = topic.trim_matches('/');
+    if prefix.is_empty() {
+        topic.to_string()
+    } else if topic.is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}/{topic}")
     }
 }
 
+// Shared MQTT helpers
 fn parse_broker(broker: &str) -> Result<ParsedBroker> {
     let url = url::Url::parse(broker).map_err(|e| {
         let message = e.to_string();
@@ -243,31 +242,65 @@ fn mqtt_v5_qos(qos: u8) -> Result<rumqttc::v5::mqttbytes::QoS> {
     }
 }
 
-fn build_v3_options(cfg: &MqttConfig, broker: &ParsedBroker) -> rumqttc::MqttOptions {
-    let mut options = rumqttc::MqttOptions::new(&cfg.client_id, &broker.host, broker.port);
-    options.set_keep_alive(std::time::Duration::from_secs(30));
+// MQTT v3
+fn apply_v3_auth(options: &mut rumqttc::MqttOptions, cfg: &MqttConfig) {
     if let Some(username) = &cfg.username {
         options.set_credentials(username, cfg.password.as_deref().unwrap_or(""));
     }
+}
+
+fn build_v3_options(cfg: &MqttConfig, broker: &ParsedBroker) -> rumqttc::MqttOptions {
+    let mut options = rumqttc::MqttOptions::new(&cfg.client_id, &broker.host, broker.port);
+    options.set_keep_alive(std::time::Duration::from_secs(30));
+    apply_v3_auth(&mut options, cfg);
+    if matches!(broker.scheme, BrokerScheme::Mqtts) {
+        options.set_transport(rumqttc::Transport::tls_with_default_config());
+    }
     options
+}
+
+fn apply_v5_auth(options: &mut rumqttc::v5::MqttOptions, cfg: &MqttConfig) {
+    if let Some(username) = &cfg.username {
+        options.set_credentials(username, cfg.password.as_deref().unwrap_or(""));
+    }
 }
 
 fn build_v5_options(cfg: &MqttConfig, broker: &ParsedBroker) -> rumqttc::v5::MqttOptions {
     let mut options = rumqttc::v5::MqttOptions::new(&cfg.client_id, &broker.host, broker.port);
     options.set_keep_alive(std::time::Duration::from_secs(30));
-    if let Some(username) = &cfg.username {
-        options.set_credentials(username, cfg.password.as_deref().unwrap_or(""));
+    apply_v5_auth(&mut options, cfg);
+    if matches!(broker.scheme, BrokerScheme::Mqtts) {
+        options.set_transport(rumqttc::Transport::tls_with_default_config());
     }
     options
 }
 
 fn build_v3_record(cfg: &MqttConfig, publish: &rumqttc::Publish) -> Record {
     Record {
-        timestamp_us: MqttInstance::current_timestamp_us(),
-        entry_name: MqttInstance::entry_name(&cfg.entry_prefix, &publish.topic),
+        timestamp_us: current_timestamp_us(),
+        entry_name: entry_name(&cfg.entry_prefix, &publish.topic),
         content: publish.payload.clone(),
         content_type: None,
         labels: build_payload_labels(cfg, publish.payload.as_ref()),
+    }
+}
+
+fn build_v5_record(cfg: &MqttConfig, publish: &rumqttc::v5::mqttbytes::v5::Publish) -> Record {
+    Record {
+        timestamp_us: current_timestamp_us(),
+        entry_name: entry_name(
+            &cfg.entry_prefix,
+            &String::from_utf8_lossy(&publish.topic),
+        ),
+        content: publish.payload.clone(),
+        content_type: publish
+            .properties
+            .as_ref()
+            .and_then(|props| props.content_type.clone()),
+        labels: build_payload_labels(cfg, publish.payload.as_ref())
+            .into_iter()
+            .chain(build_v5_property_labels(cfg, publish))
+            .collect(),
     }
 }
 
@@ -329,11 +362,12 @@ async fn launch_v3(
     Ok(ComponentRuntime { tx, task })
 }
 
+// MQTT v5
 async fn launch_v5(
     cfg: MqttConfig,
     broker: ParsedBroker,
     qos: rumqttc::v5::mqttbytes::QoS,
-    _pipeline_tx: Sender<Message>,
+    pipeline_tx: Sender<Message>,
 ) -> Result<ComponentRuntime, Error> {
     let options = build_v5_options(&cfg, &broker);
     let (client, mut eventloop) = rumqttc::v5::AsyncClient::new(options, CHANNEL_SIZE);
@@ -365,8 +399,15 @@ async fn launch_v5(
                 }
                 event = eventloop.poll() => {
                     match event {
-                        Ok(event) => {
-                            debug!("MQTT v5 event: {:?}", event);
+                        Ok(rumqttc::v5::Event::Incoming(rumqttc::v5::mqttbytes::v5::Packet::Publish(publish))) => {
+                            debug!("Received MQTT v5 publish on topic '{}'", String::from_utf8_lossy(&publish.topic));
+                            let record = build_v5_record(&cfg, &publish);
+                            if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
+                                warn!("Failed to send MQTT v5 record to pipeline: {}", err);
+                            }
+                        }
+                        Ok(other) => {
+                            debug!("Ignoring MQTT v5 event: {:?}", other);
                         }
                         Err(err) => {
                             warn!("MQTT v5 event loop error: {}", err);
@@ -413,8 +454,9 @@ impl InputLauncher for MqttInstance {
 #[cfg(test)]
 mod tests {
     use super::{
-        BrokerScheme, MqttConfig, MqttInstance, MqttVersion, build_payload_labels, build_v3_record,
-        build_v5_property_labels, mqtt_qos, parse_broker,
+        BrokerScheme, MqttConfig, MqttInstance, MqttVersion, build_payload_labels,
+        build_v3_options, build_v3_record, build_v5_options, build_v5_property_labels,
+        build_v5_record, entry_name, mqtt_qos, parse_broker,
     };
     use bytes::Bytes;
     use rumqttc::v5::mqttbytes::v5::{Publish as V5Publish, PublishProperties};
@@ -500,11 +542,11 @@ mod tests {
     #[test]
     fn builds_entry_names_with_clean_slashes() {
         assert_eq!(
-            MqttInstance::entry_name("/mqtt/", "/factory/a"),
+            entry_name("/mqtt/", "/factory/a"),
             "mqtt/factory/a"
         );
-        assert_eq!(MqttInstance::entry_name("", "/factory/a"), "factory/a");
-        assert_eq!(MqttInstance::entry_name("/mqtt/", ""), "mqtt");
+        assert_eq!(entry_name("", "/factory/a"), "factory/a");
+        assert_eq!(entry_name("/mqtt/", ""), "mqtt");
     }
 
     #[test]
@@ -532,6 +574,26 @@ mod tests {
         assert_eq!(broker.scheme, BrokerScheme::Mqtts);
         assert_eq!(broker.host, "broker.example.com");
         assert_eq!(broker.port, 8883);
+    }
+
+    #[test]
+    fn builds_v3_options_with_tls_for_mqtts() {
+        let cfg = mqtt_cfg();
+        let broker = parse_broker("mqtts://broker.example.com").unwrap();
+
+        let options = build_v3_options(&cfg, &broker);
+
+        assert!(matches!(options.transport(), rumqttc::Transport::Tls(_)));
+    }
+
+    #[test]
+    fn builds_v5_options_with_tls_for_mqtts() {
+        let cfg = mqtt_cfg();
+        let broker = parse_broker("mqtts://broker.example.com").unwrap();
+
+        let options = build_v5_options(&cfg, &broker);
+
+        assert!(matches!(options.transport(), rumqttc::Transport::Tls(_)));
     }
 
     #[test]
@@ -651,5 +713,43 @@ mod tests {
         assert_eq!(labels.get("mime"), Some(&"application/json".to_string()));
         assert_eq!(labels.get("corr"), Some(&"abc-123".to_string()));
         assert_eq!(labels.get("tenant"), Some(&"acme".to_string()));
+    }
+
+    #[test]
+    fn builds_v5_record_with_payload_and_property_labels() {
+        let mut cfg = mqtt_cfg();
+        cfg.entry_prefix = "/mqtt".to_string();
+        cfg.labels = HashMap::from([
+            ("device".to_string(), "$.device_id".to_string()),
+            ("source".to_string(), "mqtt-v5".to_string()),
+        ]);
+        cfg.property_labels = HashMap::from([
+            ("reply".to_string(), "response_topic".to_string()),
+            ("mime".to_string(), "content_type".to_string()),
+            ("tenant".to_string(), "user.tenant".to_string()),
+        ]);
+
+        let publish = V5Publish {
+            topic: Bytes::from_static(b"factory/device-9"),
+            payload: Bytes::from_static(br#"{"device_id":"dev-9"}"#),
+            properties: Some(PublishProperties {
+                response_topic: Some("reply/topic".to_string()),
+                content_type: Some("application/json".to_string()),
+                user_properties: vec![("tenant".to_string(), "acme".to_string())],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let record = build_v5_record(&cfg, &publish);
+
+        assert_eq!(record.entry_name, "mqtt/factory/device-9");
+        assert_eq!(record.content, Bytes::from_static(br#"{"device_id":"dev-9"}"#));
+        assert_eq!(record.content_type, Some("application/json".to_string()));
+        assert_eq!(record.labels.get("device"), Some(&"dev-9".to_string()));
+        assert_eq!(record.labels.get("source"), Some(&"mqtt-v5".to_string()));
+        assert_eq!(record.labels.get("reply"), Some(&"reply/topic".to_string()));
+        assert_eq!(record.labels.get("mime"), Some(&"application/json".to_string()));
+        assert_eq!(record.labels.get("tenant"), Some(&"acme".to_string()));
     }
 }

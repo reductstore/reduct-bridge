@@ -33,15 +33,15 @@ site = "$.site"
 static_source = "mqtt"
 
 [inputs.mqtt.main.property_labels]
-response_topic = "response_topic"
-content_type = "content_type"
-correlation_data = "correlation_data"
-user_property_tenant = "user.tenant"
+reply = "response_topic"
+mime = "content_type"
+correlation = "correlation_data"
+tenant = "user.tenant"
 
 
 # MQTT v3 input configuration.
 [inputs.mqtt.legacy]
-broker = "mqtt://legacy-broker.local:1883"
+broker = "mqtt://broker.example.com:1883"
 client_id = "reduct-bridge-legacy"
 version = "v3"
 
