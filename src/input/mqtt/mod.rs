@@ -288,10 +288,7 @@ fn build_v3_record(cfg: &MqttConfig, publish: &rumqttc::Publish) -> Record {
 fn build_v5_record(cfg: &MqttConfig, publish: &rumqttc::v5::mqttbytes::v5::Publish) -> Record {
     Record {
         timestamp_us: current_timestamp_us(),
-        entry_name: entry_name(
-            &cfg.entry_prefix,
-            &String::from_utf8_lossy(&publish.topic),
-        ),
+        entry_name: entry_name(&cfg.entry_prefix, &String::from_utf8_lossy(&publish.topic)),
         content: publish.payload.clone(),
         content_type: publish
             .properties
@@ -541,10 +538,7 @@ mod tests {
 
     #[test]
     fn builds_entry_names_with_clean_slashes() {
-        assert_eq!(
-            entry_name("/mqtt/", "/factory/a"),
-            "mqtt/factory/a"
-        );
+        assert_eq!(entry_name("/mqtt/", "/factory/a"), "mqtt/factory/a");
         assert_eq!(entry_name("", "/factory/a"), "factory/a");
         assert_eq!(entry_name("/mqtt/", ""), "mqtt");
     }
@@ -744,12 +738,18 @@ mod tests {
         let record = build_v5_record(&cfg, &publish);
 
         assert_eq!(record.entry_name, "mqtt/factory/device-9");
-        assert_eq!(record.content, Bytes::from_static(br#"{"device_id":"dev-9"}"#));
+        assert_eq!(
+            record.content,
+            Bytes::from_static(br#"{"device_id":"dev-9"}"#)
+        );
         assert_eq!(record.content_type, Some("application/json".to_string()));
         assert_eq!(record.labels.get("device"), Some(&"dev-9".to_string()));
         assert_eq!(record.labels.get("source"), Some(&"mqtt-v5".to_string()));
         assert_eq!(record.labels.get("reply"), Some(&"reply/topic".to_string()));
-        assert_eq!(record.labels.get("mime"), Some(&"application/json".to_string()));
+        assert_eq!(
+            record.labels.get("mime"),
+            Some(&"application/json".to_string())
+        );
         assert_eq!(record.labels.get("tenant"), Some(&"acme".to_string()));
     }
 }
