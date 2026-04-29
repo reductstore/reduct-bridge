@@ -1,0 +1,116 @@
+use super::{
+    BrokerScheme, MqttConfig, ParsedBroker, build_payload_labels, current_timestamp_us,
+    ensure_rustls_crypto_provider, find_topic_config, resolve_entry_name,
+};
+use crate::message::{Message, Record};
+use crate::runtime::ComponentRuntime;
+use anyhow::{Error, Result, bail};
+use log::{debug, info, warn};
+use tokio::sync::mpsc::{Sender, channel};
+
+const CHANNEL_SIZE: usize = 1024;
+
+fn apply_v3_auth(options: &mut rumqttc::MqttOptions, cfg: &MqttConfig) {
+    if let Some(username) = &cfg.username {
+        options.set_credentials(username, cfg.password.as_deref().unwrap_or(""));
+    }
+}
+
+pub(super) fn mqtt_qos(qos: u8) -> Result<rumqttc::QoS> {
+    match qos {
+        0 => Ok(rumqttc::QoS::AtMostOnce),
+        1 => Ok(rumqttc::QoS::AtLeastOnce),
+        2 => Ok(rumqttc::QoS::ExactlyOnce),
+        _ => bail!("Invalid MQTT QoS level: {}", qos),
+    }
+}
+
+pub(super) fn build_v3_options(cfg: &MqttConfig, broker: &ParsedBroker) -> rumqttc::MqttOptions {
+    let mut options = rumqttc::MqttOptions::new(&cfg.client_id, &broker.host, broker.port);
+    options.set_keep_alive(std::time::Duration::from_secs(30));
+    apply_v3_auth(&mut options, cfg);
+    if matches!(broker.scheme, BrokerScheme::Mqtts) {
+        ensure_rustls_crypto_provider();
+        options.set_transport(rumqttc::Transport::tls_with_default_config());
+    }
+    options
+}
+
+pub(super) fn build_v3_record(cfg: &MqttConfig, publish: &rumqttc::Publish) -> Record {
+    let topic_cfg = find_topic_config(cfg, &publish.topic)
+        .expect("received MQTT v3 publish for unsubscribed topic");
+
+    Record {
+        timestamp_us: current_timestamp_us(),
+        entry_name: resolve_entry_name(&cfg.entry_prefix, topic_cfg, &publish.topic),
+        content: publish.payload.clone(),
+        content_type: topic_cfg.content_type.clone(),
+        labels: build_payload_labels(
+            cfg,
+            publish.payload.as_ref(),
+            std::collections::HashMap::new(),
+        ),
+    }
+}
+
+pub(super) async fn launch_v3(
+    cfg: MqttConfig,
+    broker: ParsedBroker,
+    qos: rumqttc::QoS,
+    pipeline_tx: Sender<Message>,
+) -> Result<ComponentRuntime, Error> {
+    let options = build_v3_options(&cfg, &broker);
+    let (client, mut eventloop) = rumqttc::AsyncClient::new(options, CHANNEL_SIZE);
+
+    for topic in &cfg.topics {
+        client.subscribe(&topic.name, qos).await.map_err(|err| {
+            anyhow::anyhow!(
+                "Failed to subscribe to MQTT topic '{}': {}",
+                topic.name,
+                err
+            )
+        })?;
+    }
+
+    let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                maybe_message = rx.recv() => {
+                    match maybe_message {
+                        Some(Message::Stop) => {
+                            info!("Stop message received, shutting down MQTT v3 worker");
+                            break;
+                        }
+                        Some(other) => {
+                            debug!("Ignoring unsupported control message in MQTT v3 input: {:?}", other);
+                        }
+                        None => {
+                            info!("MQTT v3 control channel closed, shutting down worker");
+                            break;
+                        }
+                    }
+                }
+                event = eventloop.poll() => {
+                    match event {
+                        Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish))) => {
+                            debug!("Received MQTT v3 publish on topic '{}'", publish.topic);
+                            let record = build_v3_record(&cfg, &publish);
+                            if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
+                                warn!("Failed to send MQTT v3 record to pipeline: {}", err);
+                            }
+                        }
+                        Ok(other) => {
+                            debug!("Ignoring MQTT v3 event: {:?}", other);
+                        }
+                        Err(err) => {
+                            warn!("MQTT v3 event loop error: {}", err);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(ComponentRuntime { tx, task })
+}

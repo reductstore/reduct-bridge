@@ -87,6 +87,7 @@ cargo install reduct-bridge
 
 `cargo install reduct-bridge` builds the default feature set, which includes only the `shell` input.
 For MQTT-specific build and runtime guidance, see [MQTT input documentation](src/input/mqtt/README.md).
+The MQTT input is grouped under the `iot` Cargo feature alongside future IoT protocols.
 For metrics-specific build and runtime guidance, see [Metrics input documentation](src/input/metrics/README.md).
 For ROS2-specific build and runtime guidance, see [ROS2 input documentation](src/input/ros2/README.md).
 
