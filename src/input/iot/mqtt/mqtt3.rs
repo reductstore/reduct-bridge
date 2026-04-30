@@ -55,6 +55,21 @@ pub(super) fn build_v3_record(cfg: &MqttConfig, publish: &rumqttc::Publish) -> R
     }
 }
 
+async fn subscribe_all_topics(
+    client: &rumqttc::AsyncClient,
+    cfg: &MqttConfig,
+    qos: rumqttc::QoS,
+) {
+    for topic in &cfg.topics {
+        if let Err(err) = client.subscribe(&topic.name, qos).await {
+            warn!(
+                "Failed to subscribe to MQTT v3 topic '{}': {}",
+                topic.name, err
+            );
+        }
+    }
+}
+
 pub(super) async fn launch_v3(
     cfg: MqttConfig,
     broker: ParsedBroker,
@@ -103,6 +118,15 @@ pub(super) async fn launch_v3(
                             let record = build_v3_record(&cfg, &publish);
                             if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
                                 warn!("Failed to send MQTT v3 record to pipeline: {}", err);
+                            }
+                        }
+                        Ok(rumqttc::Event::Incoming(rumqttc::Packet::ConnAck(conn_ack))) => {
+                            consecutive_errors = 0;
+                            if conn_ack.code == rumqttc::ConnectReturnCode::Success {
+                                info!("MQTT v3 connection established, re-subscribing to topics");
+                                subscribe_all_topics(&client, &cfg, qos).await;
+                            } else {
+                                warn!("MQTT v3 connection failed: {:?}", conn_ack.code);
                             }
                         }
                         Ok(other) => {

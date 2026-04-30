@@ -103,6 +103,21 @@ pub(super) fn build_v5_record(
     }
 }
 
+async fn subscribe_all_topics_v5(
+    client: &rumqttc::v5::AsyncClient,
+    cfg: &MqttConfig,
+    qos: rumqttc::v5::mqttbytes::QoS,
+) {
+    for topic in &cfg.topics {
+        if let Err(err) = client.subscribe(&topic.name, qos).await {
+            warn!(
+                "Failed to subscribe to MQTT v5 topic '{}': {}",
+                topic.name, err
+            );
+        }
+    }
+}
+
 pub(super) async fn launch_v5(
     cfg: MqttConfig,
     broker: ParsedBroker,
@@ -151,6 +166,15 @@ pub(super) async fn launch_v5(
                             let record = build_v5_record(&cfg, &publish);
                             if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
                                 warn!("Failed to send MQTT v5 record to pipeline: {}", err);
+                            }
+                        }
+                        Ok(rumqttc::v5::Event::Incoming(rumqttc::v5::mqttbytes::v5::Packet::ConnAck(conn_ack))) => {
+                            consecutive_errors = 0;
+                            if conn_ack.code == rumqttc::v5::mqttbytes::v5::ConnectReturnCode::Success {
+                                info!("MQTT v5 connection established, re-subscribing to topics");
+                                subscribe_all_topics_v5(&client, &cfg, qos).await;
+                            } else {
+                                warn!("MQTT v5 connection failed: {:?}", conn_ack.code);
                             }
                         }
                         Ok(other) => {
