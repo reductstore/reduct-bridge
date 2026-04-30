@@ -6,7 +6,7 @@ use super::{
 use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use tokio::sync::mpsc::{Sender, channel};
 use tokio::time::sleep;
@@ -174,7 +174,7 @@ pub(super) async fn launch_v5(
                                 info!("MQTT v5 connection established, re-subscribing to topics");
                                 subscribe_all_topics_v5(&client, &cfg, qos).await;
                             } else {
-                                warn!("MQTT v5 connection failed: {:?}", conn_ack.code);
+                                error!("MQTT v5 connection failed: {:?}", conn_ack.code);
                             }
                         }
                         Ok(other) => {
@@ -185,7 +185,7 @@ pub(super) async fn launch_v5(
                             let retry_delay = reconnect_retry_delay(consecutive_errors);
                             let now = std::time::Instant::now();
                             if should_warn_retry(last_warning_at, now) {
-                                warn!(
+                                error!(
                                     "MQTT v5 event loop error: {}. Retrying in {:?}",
                                     err,
                                     retry_delay

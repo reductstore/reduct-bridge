@@ -6,7 +6,7 @@ use super::{
 use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use tokio::sync::mpsc::{Sender, channel};
 use tokio::time::sleep;
 
@@ -55,11 +55,7 @@ pub(super) fn build_v3_record(cfg: &MqttConfig, publish: &rumqttc::Publish) -> R
     }
 }
 
-async fn subscribe_all_topics(
-    client: &rumqttc::AsyncClient,
-    cfg: &MqttConfig,
-    qos: rumqttc::QoS,
-) {
+async fn subscribe_all_topics(client: &rumqttc::AsyncClient, cfg: &MqttConfig, qos: rumqttc::QoS) {
     for topic in &cfg.topics {
         if let Err(err) = client.subscribe(&topic.name, qos).await {
             warn!(
@@ -126,7 +122,7 @@ pub(super) async fn launch_v3(
                                 info!("MQTT v3 connection established, re-subscribing to topics");
                                 subscribe_all_topics(&client, &cfg, qos).await;
                             } else {
-                                warn!("MQTT v3 connection failed: {:?}", conn_ack.code);
+                                error!("MQTT v3 connection failed: {:?}", conn_ack.code);
                             }
                         }
                         Ok(other) => {
@@ -137,7 +133,7 @@ pub(super) async fn launch_v3(
                             let retry_delay = reconnect_retry_delay(consecutive_errors);
                             let now = std::time::Instant::now();
                             if should_warn_retry(last_warning_at, now) {
-                                warn!(
+                                error!(
                                     "MQTT v3 event loop error: {}. Retrying in {:?}",
                                     err,
                                     retry_delay
