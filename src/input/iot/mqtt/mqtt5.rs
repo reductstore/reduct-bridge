@@ -63,17 +63,15 @@ pub(super) fn build_v5_property_labels(
                     labels.insert(label_name.clone(), value.clone());
                 }
             }
-            user_key if user_key.starts_with("user.") => {
-                let expected_key = &user_key["user.".len()..];
+            user_key => {
                 if let Some((_, value)) = properties
                     .user_properties
                     .iter()
-                    .find(|(key, _)| key == expected_key)
+                    .find(|(key, _)| key == user_key)
                 {
                     labels.insert(label_name.clone(), value.clone());
                 }
             }
-            _ => {}
         }
     }
 

@@ -703,7 +703,7 @@ mod tests {
                 label: "mime".to_string(),
             },
             MqttLabelRule::Property {
-                property: "user.tenant".to_string(),
+                property: "tenant".to_string(),
                 label: "tenant".to_string(),
             },
         ];
@@ -748,7 +748,7 @@ mod tests {
                 label: "mime".to_string(),
             },
             MqttLabelRule::Property {
-                property: "user.tenant".to_string(),
+                property: "tenant".to_string(),
                 label: "tenant".to_string(),
             },
         ];

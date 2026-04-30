@@ -29,12 +29,20 @@ entry_prefix = "/mqtt"
 name = "factory/+/telemetry"
 entry_name = "telemetry"
 content_type = "application/json"
+# Optional label rules (default = []):
+# 1) Dynamic field label:
+#    { field = "device_id", label = "device" }
+# 2) Static labels:
+#    { static = { source = "mqtt", site = "lab" } }
+# 3) MQTT v5 property label:
+#    { property = "content_type", label = "mime" }
+#    { property = "tenant", label = "tenant" }  # MQTT v5 user property
 labels = [
   { field = "device_id", label = "device" },
   { field = "site", label = "site" },
   { static = { source = "mqtt" } },
   { property = "content_type", label = "mime" },
-  { property = "user.tenant", label = "tenant" }
+  { property = "tenant", label = "tenant" }
 ]
 
 [[inputs.mqtt.main.topics]]

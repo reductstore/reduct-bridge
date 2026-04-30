@@ -9,6 +9,11 @@ MQTT label rules follow the same ordered model as the ROS inputs:
 - payload field labels are applied after static labels and can override them
 - MQTT v5 property labels are also applied in order and can override earlier labels
 
+For MQTT v5 property labels:
+
+- `property = "content_type"` reads the built-in MQTT v5 `content_type` property
+- any other `property = "<name>"` reads the MQTT v5 user property named `<name>`
+
 ## Configuration
 
 ```toml
@@ -27,12 +32,20 @@ entry_prefix = "/mqtt"
 name = "factory/+/telemetry"
 entry_name = "telemetry"
 content_type = "application/json"
+# Optional label rules (default = []):
+# 1) Dynamic field label:
+#    { field = "device_id", label = "device" }
+# 2) Static labels:
+#    { static = { source = "mqtt", site = "lab" } }
+# 3) MQTT v5 property label:
+#    { property = "content_type", label = "mime" }
+#    { property = "tenant", label = "tenant" }  # MQTT v5 user property
 labels = [
   { field = "device_id", label = "device" },
   { field = "site", label = "site" },
   { static = { source = "mqtt" } },
   { property = "content_type", label = "mime" },
-  { property = "user.tenant", label = "tenant" }
+  { property = "tenant", label = "tenant" }
 ]
 
 [[inputs.mqtt.main.topics]]
@@ -43,6 +56,7 @@ labels = [
 ```
 
 `entry_name`, `content_type`, and `labels` are configured per topic. `content_type` is used as the default record content type when an MQTT v5 publish does not provide a `content_type` property; for MQTT v3 it is used directly.
+Use bare names such as `tenant`, `status`, or `id` for MQTT v5 user properties.
 
 ### MQTT v3 example
 
