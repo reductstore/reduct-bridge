@@ -24,7 +24,7 @@ use log::info;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::Sender;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -35,6 +35,7 @@ pub enum MqttVersion {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[allow(dead_code)]
 pub struct MqttConfig {
     pub broker: String,
@@ -49,17 +50,18 @@ pub struct MqttConfig {
     pub password: Option<String>,
     #[serde(default)]
     pub entry_prefix: String,
-    #[serde(default)]
-    pub labels: Vec<MqttLabelRule>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MqttTopicConfig {
     pub name: String,
     #[serde(default)]
     pub entry_name: Option<String>,
     #[serde(default)]
     pub content_type: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<MqttLabelRule>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -123,6 +125,14 @@ impl MqttInstance {
             {
                 bail!("MQTT input topic content_type must not be empty");
             }
+            if matches!(cfg.version, MqttVersion::V3)
+                && topic
+                    .labels
+                    .iter()
+                    .any(|rule| matches!(rule, MqttLabelRule::Property { .. }))
+            {
+                bail!("MQTT v3 input does not support property label rules");
+            }
         }
 
         if cfg.qos > 2 {
@@ -131,15 +141,6 @@ impl MqttInstance {
 
         if cfg.password.is_some() && cfg.username.is_none() {
             bail!("MQTT input password requires username to be set");
-        }
-
-        if matches!(cfg.version, MqttVersion::V3)
-            && cfg
-                .labels
-                .iter()
-                .any(|rule| matches!(rule, MqttLabelRule::Property { .. }))
-        {
-            bail!("MQTT v3 input does not support property label rules");
         }
 
         Ok(())
@@ -151,6 +152,21 @@ pub(super) fn current_timestamp_us() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_micros() as u64
+}
+
+pub(super) fn reconnect_retry_delay(consecutive_errors: u32) -> Duration {
+    match consecutive_errors {
+        0 => Duration::from_millis(100),
+        1 => Duration::from_millis(250),
+        2 => Duration::from_millis(500),
+        3 => Duration::from_secs(1),
+        4 => Duration::from_secs(2),
+        _ => Duration::from_secs(5),
+    }
+}
+
+pub(super) fn should_warn_retry(last_warning_at: Option<Instant>, now: Instant) -> bool {
+    last_warning_at.is_none_or(|last| now.duration_since(last) >= Duration::from_secs(30))
 }
 
 pub(super) fn entry_name(prefix: &str, topic: &str) -> String {
@@ -254,14 +270,14 @@ pub(super) fn build_static_labels(rules: &[MqttLabelRule]) -> HashMap<String, St
 }
 
 pub(super) fn build_payload_labels(
-    cfg: &MqttConfig,
+    topic_cfg: &MqttTopicConfig,
     payload: &[u8],
     property_labels: HashMap<String, String>,
 ) -> HashMap<String, String> {
-    let mut labels = build_static_labels(&cfg.labels);
+    let mut labels = build_static_labels(&topic_cfg.labels);
     let json = serde_json::from_slice::<Value>(payload).ok();
 
-    for rule in &cfg.labels {
+    for rule in &topic_cfg.labels {
         match rule {
             MqttLabelRule::Field { field, label } => {
                 if let Some(json) = &json {
@@ -342,13 +358,30 @@ mod tests {
                 name: "factory/+/telemetry".to_string(),
                 entry_name: None,
                 content_type: None,
+                labels: Vec::new(),
             }],
             qos: 1,
             username: None,
             password: None,
             entry_prefix: "mqtt".to_string(),
-            labels: Vec::new(),
         }
+    }
+
+    #[test]
+    fn rejects_labels_nested_under_topic_table() {
+        let cfg_text = r#"
+            broker = "mqtt://localhost:1883"
+            client_id = "reduct-bridge"
+            version = "v3"
+            qos = 0
+            entry_prefix = "/mqtt"
+
+            [[topics]]
+            name = "test/topic"
+            labels = [{ static = { source = "mqtt" } }]
+        "#;
+        let cfg = toml::from_str::<MqttConfig>(cfg_text).unwrap();
+        assert_eq!(cfg.topics[0].labels.len(), 1);
     }
 
     #[test]
@@ -405,7 +438,7 @@ mod tests {
     fn rejects_property_rules_for_v3() {
         let mut cfg = mqtt_cfg();
         cfg.version = MqttVersion::V3;
-        cfg.labels.push(MqttLabelRule::Property {
+        cfg.topics[0].labels.push(MqttLabelRule::Property {
             property: "content_type".to_string(),
             label: "content_type".to_string(),
         });
@@ -465,11 +498,13 @@ mod tests {
                     name: "factory/+/events".to_string(),
                     entry_name: None,
                     content_type: None,
+                    labels: Vec::new(),
                 },
                 MqttTopicConfig {
                     name: "factory/+/telemetry".to_string(),
                     entry_name: Some("telemetry".to_string()),
                     content_type: Some("application/json".to_string()),
+                    labels: Vec::new(),
                 },
             ],
             ..mqtt_cfg()
@@ -487,6 +522,7 @@ mod tests {
             name: "factory/+/telemetry".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: None,
+            labels: Vec::new(),
         };
 
         assert_eq!(
@@ -573,7 +609,7 @@ mod tests {
     #[test]
     fn builds_payload_labels_from_static_and_json_rules() {
         let mut cfg = mqtt_cfg();
-        cfg.labels = vec![
+        cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
                 field: "device_id".to_string(),
                 label: "device".to_string(),
@@ -588,7 +624,7 @@ mod tests {
         ];
 
         let labels = build_payload_labels(
-            &cfg,
+            &cfg.topics[0],
             br#"{"device_id":"dev-1","site":"lab"}"#,
             HashMap::new(),
         );
@@ -601,7 +637,7 @@ mod tests {
     #[test]
     fn skips_json_labels_when_payload_is_not_json() {
         let mut cfg = mqtt_cfg();
-        cfg.labels = vec![
+        cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
                 field: "device_id".to_string(),
                 label: "device".to_string(),
@@ -611,7 +647,7 @@ mod tests {
             },
         ];
 
-        let labels = build_payload_labels(&cfg, b"plain text payload", HashMap::new());
+        let labels = build_payload_labels(&cfg.topics[0], b"plain text payload", HashMap::new());
 
         assert_eq!(labels.get("device"), None);
         assert_eq!(labels.get("source"), Some(&"mqtt".to_string()));
@@ -624,9 +660,10 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
+            labels: Vec::new(),
         }];
         cfg.entry_prefix = "/mqtt".to_string();
-        cfg.labels = vec![
+        cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
                 field: "device_id".to_string(),
                 label: "device".to_string(),
@@ -660,7 +697,7 @@ mod tests {
     #[test]
     fn builds_v5_property_labels_from_known_properties() {
         let mut cfg = mqtt_cfg();
-        cfg.labels = vec![
+        cfg.topics[0].labels = vec![
             MqttLabelRule::Property {
                 property: "content_type".to_string(),
                 label: "mime".to_string(),
@@ -682,7 +719,7 @@ mod tests {
             ..Default::default()
         };
 
-        let labels = mqtt5::build_v5_property_labels(&cfg, &publish);
+        let labels = mqtt5::build_v5_property_labels(&cfg.topics[0], &publish);
 
         assert_eq!(labels.get("mime"), Some(&"application/json".to_string()));
         assert_eq!(labels.get("tenant"), Some(&"acme".to_string()));
@@ -695,9 +732,10 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: Some("application/json".to_string()),
+            labels: Vec::new(),
         }];
         cfg.entry_prefix = "/mqtt".to_string();
-        cfg.labels = vec![
+        cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
                 field: "device_id".to_string(),
                 label: "device".to_string(),
@@ -750,6 +788,7 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
+            labels: Vec::new(),
         }];
 
         let publish = V5Publish {

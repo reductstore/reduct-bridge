@@ -27,10 +27,6 @@ entry_prefix = "/mqtt"
 name = "factory/+/telemetry"
 entry_name = "telemetry"
 content_type = "application/json"
-
-[[inputs.mqtt.main.topics]]
-name = "factory/+/events"
-
 labels = [
   { field = "device_id", label = "device" },
   { field = "site", label = "site" },
@@ -38,9 +34,15 @@ labels = [
   { property = "content_type", label = "mime" },
   { property = "user.tenant", label = "tenant" }
 ]
+
+[[inputs.mqtt.main.topics]]
+name = "factory/+/events"
+labels = [
+  { static = { source = "mqtt-events" } }
+]
 ```
 
-`entry_name` is optional per topic. `content_type` is used as the default record content type when an MQTT v5 publish does not provide a `content_type` property; for MQTT v3 it is used directly.
+`entry_name`, `content_type`, and `labels` are configured per topic. `content_type` is used as the default record content type when an MQTT v5 publish does not provide a `content_type` property; for MQTT v3 it is used directly.
 
 ### MQTT v3 example
 
@@ -60,7 +62,6 @@ entry_prefix = "/mqtt"
 name = "legacy/+/data"
 entry_name = "legacy"
 content_type = "application/json"
-
 labels = [
   { field = "line", label = "line" },
   { static = { source = "mqtt-v3" } }

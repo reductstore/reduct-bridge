@@ -1,12 +1,14 @@
 use super::{
     BrokerScheme, MqttConfig, ParsedBroker, build_payload_labels, current_timestamp_us,
-    ensure_rustls_crypto_provider, find_topic_config, resolve_entry_name,
+    ensure_rustls_crypto_provider, find_topic_config, reconnect_retry_delay, resolve_entry_name,
+    should_warn_retry,
 };
 use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
 use log::{debug, info, warn};
 use tokio::sync::mpsc::{Sender, channel};
+use tokio::time::sleep;
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -46,7 +48,7 @@ pub(super) fn build_v3_record(cfg: &MqttConfig, publish: &rumqttc::Publish) -> R
         content: publish.payload.clone(),
         content_type: topic_cfg.content_type.clone(),
         labels: build_payload_labels(
-            cfg,
+            topic_cfg,
             publish.payload.as_ref(),
             std::collections::HashMap::new(),
         ),
@@ -74,6 +76,8 @@ pub(super) async fn launch_v3(
 
     let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
     let task = tokio::spawn(async move {
+        let mut consecutive_errors = 0u32;
+        let mut last_warning_at = None;
         loop {
             tokio::select! {
                 maybe_message = rx.recv() => {
@@ -94,6 +98,7 @@ pub(super) async fn launch_v3(
                 event = eventloop.poll() => {
                     match event {
                         Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish))) => {
+                            consecutive_errors = 0;
                             debug!("Received MQTT v3 publish on topic '{}'", publish.topic);
                             let record = build_v3_record(&cfg, &publish);
                             if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
@@ -101,10 +106,28 @@ pub(super) async fn launch_v3(
                             }
                         }
                         Ok(other) => {
+                            consecutive_errors = 0;
                             debug!("Ignoring MQTT v3 event: {:?}", other);
                         }
                         Err(err) => {
-                            warn!("MQTT v3 event loop error: {}", err);
+                            let retry_delay = reconnect_retry_delay(consecutive_errors);
+                            let now = std::time::Instant::now();
+                            if should_warn_retry(last_warning_at, now) {
+                                warn!(
+                                    "MQTT v3 event loop error: {}. Retrying in {:?}",
+                                    err,
+                                    retry_delay
+                                );
+                                last_warning_at = Some(now);
+                            } else {
+                                debug!(
+                                    "MQTT v3 event loop error: {}. Retrying in {:?}",
+                                    err,
+                                    retry_delay
+                                );
+                            }
+                            consecutive_errors = consecutive_errors.saturating_add(1);
+                            sleep(retry_delay).await;
                         }
                     }
                 }

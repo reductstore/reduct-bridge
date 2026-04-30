@@ -1,6 +1,7 @@
 use super::{
-    BrokerScheme, MqttConfig, ParsedBroker, build_payload_labels, current_timestamp_us,
-    ensure_rustls_crypto_provider, find_topic_config, resolve_entry_name,
+    BrokerScheme, MqttConfig, MqttTopicConfig, ParsedBroker, build_payload_labels,
+    current_timestamp_us, ensure_rustls_crypto_provider, find_topic_config, reconnect_retry_delay,
+    resolve_entry_name, should_warn_retry,
 };
 use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
@@ -8,6 +9,7 @@ use anyhow::{Error, Result, bail};
 use log::{debug, info, warn};
 use std::collections::HashMap;
 use tokio::sync::mpsc::{Sender, channel};
+use tokio::time::sleep;
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -41,7 +43,7 @@ pub(super) fn build_v5_options(
 }
 
 pub(super) fn build_v5_property_labels(
-    cfg: &MqttConfig,
+    topic_cfg: &MqttTopicConfig,
     publish: &rumqttc::v5::mqttbytes::v5::Publish,
 ) -> HashMap<String, String> {
     let mut labels = HashMap::new();
@@ -49,7 +51,7 @@ pub(super) fn build_v5_property_labels(
         return labels;
     };
 
-    for rule in &cfg.labels {
+    for rule in &topic_cfg.labels {
         let (property_name, label_name) = match rule {
             super::MqttLabelRule::Property { property, label } => (property.as_str(), label),
             _ => continue,
@@ -96,9 +98,9 @@ pub(super) fn build_v5_record(
             .and_then(|props| props.content_type.clone())
             .or_else(|| topic_cfg.content_type.clone()),
         labels: build_payload_labels(
-            cfg,
+            topic_cfg,
             publish.payload.as_ref(),
-            build_v5_property_labels(cfg, publish),
+            build_v5_property_labels(topic_cfg, publish),
         ),
     }
 }
@@ -124,6 +126,8 @@ pub(super) async fn launch_v5(
 
     let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
     let task = tokio::spawn(async move {
+        let mut consecutive_errors = 0u32;
+        let mut last_warning_at = None;
         loop {
             tokio::select! {
                 maybe_message = rx.recv() => {
@@ -144,6 +148,7 @@ pub(super) async fn launch_v5(
                 event = eventloop.poll() => {
                     match event {
                         Ok(rumqttc::v5::Event::Incoming(rumqttc::v5::mqttbytes::v5::Packet::Publish(publish))) => {
+                            consecutive_errors = 0;
                             debug!("Received MQTT v5 publish on topic '{}'", String::from_utf8_lossy(&publish.topic));
                             let record = build_v5_record(&cfg, &publish);
                             if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
@@ -151,10 +156,28 @@ pub(super) async fn launch_v5(
                             }
                         }
                         Ok(other) => {
+                            consecutive_errors = 0;
                             debug!("Ignoring MQTT v5 event: {:?}", other);
                         }
                         Err(err) => {
-                            warn!("MQTT v5 event loop error: {}", err);
+                            let retry_delay = reconnect_retry_delay(consecutive_errors);
+                            let now = std::time::Instant::now();
+                            if should_warn_retry(last_warning_at, now) {
+                                warn!(
+                                    "MQTT v5 event loop error: {}. Retrying in {:?}",
+                                    err,
+                                    retry_delay
+                                );
+                                last_warning_at = Some(now);
+                            } else {
+                                debug!(
+                                    "MQTT v5 event loop error: {}. Retrying in {:?}",
+                                    err,
+                                    retry_delay
+                                );
+                            }
+                            consecutive_errors = consecutive_errors.saturating_add(1);
+                            sleep(retry_delay).await;
                         }
                     }
                 }
