@@ -36,8 +36,9 @@ runs:
         echo "=== [mqtt-it] Starting MQTT broker ==="
         docker run -d --rm --name "$MQTT_CONTAINER" \
           -p 1883:1883 \
-          -v "${GITHUB_WORKSPACE}/testing/mqtt-local/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" \
-          eclipse-mosquitto:2
+          -v "${GITHUB_WORKSPACE}/testing/mqtt-local:/mosquitto/config:ro" \
+          eclipse-mosquitto:2 \
+          mosquitto -c /mosquitto/config/mosquitto.conf
         sleep 3
 
         echo "=== [mqtt-it] Starting reduct-bridge in debug mode ==="
