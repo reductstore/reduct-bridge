@@ -1,0 +1,28 @@
+[[remotes.reduct]]
+name = "local"
+url = "http://localhost:8383"
+token_api = "reduct"
+bucket = "mqtt-it"
+prefix = ""
+
+[inputs.mqtt.main]
+broker = "mqtt://127.0.0.1:1883"
+client_id = "reduct-bridge-mqtt-it"
+version = "v5"
+qos = 0
+entry_prefix = "/mqtt"
+
+[[inputs.mqtt.main.topics]]
+name = "test/v5"
+content_type = "application/json"
+labels = [
+  { field = "device_id", label = "device" },
+  { field = "site", label = "site" },
+  { static = { source = "mqtt-v5-it" } },
+  { property = "content_type", label = "mime" },
+  { property = "tenant", label = "tenant" }
+]
+
+[pipelines.mqtt_input_it]
+remote = "local"
+inputs = ["main"]

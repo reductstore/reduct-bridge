@@ -1,0 +1,140 @@
+name: "MQTT Input Smoke Test"
+description: "Runs reduct-bridge against a local MQTT v5 broker and validates ReductStore records and labels."
+inputs:
+  bridge_binary:
+    description: "Path to reduct-bridge binary"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - uses: ./.github/actions/run-reductstore
+      with:
+        container_name: reduct-store-mqtt-it
+        host_port: 8383
+        log_level: DEBUG
+
+    - name: Run MQTT smoke test
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        BRIDGE_BIN="${{ inputs.bridge_binary }}"
+        MQTT_PID_FILE="/tmp/mqtt-broker-it.pid"
+        REDUCT_URL="http://127.0.0.1:8383"
+        BUCKET="mqtt-it"
+        BRIDGE_CFG="${GITHUB_WORKSPACE}/.github/configs/mqtt_input_it.toml"
+        BRIDGE_LOG="/tmp/reduct-bridge-mqtt-it.log"
+        MQTT_LOG="/tmp/mqtt-broker-it.log"
+
+        rm -f /tmp/reduct-bridge-mqtt-it.pid "$MQTT_PID_FILE" "$BRIDGE_LOG" "$MQTT_LOG"
+        pkill -x mosquitto >/dev/null 2>&1 || true
+
+        echo "=== [mqtt-it] Creating bucket via ReductStore API ==="
+        curl -sf -X POST "${REDUCT_URL}/api/v1/b/${BUCKET}" \
+          -H "Content-Type: application/json" \
+          -d '{}' >/dev/null || true
+
+        echo "=== [mqtt-it] Starting MQTT broker ==="
+        mosquitto -c "${GITHUB_WORKSPACE}/testing/mqtt-local/mosquitto.conf" -v >"$MQTT_LOG" 2>&1 &
+        MQTT_PID=$!
+        echo "$MQTT_PID" >"$MQTT_PID_FILE"
+        sleep 3
+
+        echo "=== [mqtt-it] Starting reduct-bridge in debug mode ==="
+        chmod +x "$BRIDGE_BIN"
+        RUST_LOG=debug "$BRIDGE_BIN" "$BRIDGE_CFG" >"$BRIDGE_LOG" 2>&1 &
+        BRIDGE_PID=$!
+        echo "$BRIDGE_PID" >/tmp/reduct-bridge-mqtt-it.pid
+        sleep 4
+
+        echo "=== [mqtt-it] Publishing MQTT v5 payload with user properties ==="
+        mosquitto_pub -h 127.0.0.1 -p 1883 -V mqttv5 \
+          -t test/v5 \
+          -m '{"device_id":"dev-9","site":"lab"}' \
+          -D PUBLISH user-property tenant acme \
+          -D PUBLISH content-type application/json
+
+        echo "=== [mqtt-it] Waiting for bridge flush ==="
+        sleep 3
+
+        echo "=== [mqtt-it] Stopping bridge and waiting for flush ==="
+        kill -INT "$BRIDGE_PID"
+        wait "$BRIDGE_PID"
+        rm -f /tmp/reduct-bridge-mqtt-it.pid
+
+        echo "=== [mqtt-it] Verifying MQTT record and labels ==="
+        bucket_json="$(curl -sf "${REDUCT_URL}/api/v1/b/${BUCKET}")"
+        mqtt_ts="$(echo "$bucket_json" | jq -r '.entries[] | select(.name=="mqtt/test/v5") | .latest_record')"
+        if [[ -z "$mqtt_ts" || "$mqtt_ts" == "null" ]]; then
+          echo "mqtt/test/v5 entry was not found in bucket metadata"
+          echo "$bucket_json"
+          exit 1
+        fi
+
+        mqtt_head="$(curl -sfI "${REDUCT_URL}/api/v1/b/${BUCKET}/mqtt/test/v5?ts=${mqtt_ts}")"
+        if ! echo "$mqtt_head" | grep -Eiq '^x-reduct-label-device:\s*dev-9\s*$'; then
+          echo "device label is missing in MQTT record headers:"
+          echo "$mqtt_head"
+          exit 1
+        fi
+        if ! echo "$mqtt_head" | grep -Eiq '^x-reduct-label-site:\s*lab\s*$'; then
+          echo "site label is missing in MQTT record headers:"
+          echo "$mqtt_head"
+          exit 1
+        fi
+        if ! echo "$mqtt_head" | grep -Eiq '^x-reduct-label-source:\s*mqtt-v5-it\s*$'; then
+          echo "source label is missing in MQTT record headers:"
+          echo "$mqtt_head"
+          exit 1
+        fi
+        if ! echo "$mqtt_head" | grep -Eiq '^x-reduct-label-tenant:\s*acme\s*$'; then
+          echo "tenant label is missing in MQTT record headers:"
+          echo "$mqtt_head"
+          exit 1
+        fi
+        if ! echo "$mqtt_head" | grep -Eiq '^x-reduct-label-mime:\s*application/json\s*$'; then
+          echo "mime label is missing in MQTT record headers:"
+          echo "$mqtt_head"
+          exit 1
+        fi
+
+        mqtt_payload="$(curl -sf "${REDUCT_URL}/api/v1/b/${BUCKET}/mqtt/test/v5?ts=${mqtt_ts}")"
+        if ! echo "$mqtt_payload" | jq -e '.device_id == "dev-9" and .site == "lab"' >/dev/null; then
+          echo "Unexpected MQTT payload:"
+          echo "$mqtt_payload"
+          exit 1
+        fi
+        if [[ -f "$MQTT_PID_FILE" ]]; then
+          kill "$(cat "$MQTT_PID_FILE")" >/dev/null 2>&1 || true
+          rm -f "$MQTT_PID_FILE"
+        fi
+        echo "=== [mqtt-it] Verification passed: MQTT record has payload and labels ==="
+
+    - name: Print reduct-bridge logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [mqtt-it] Final logs: reduct-bridge ==="
+        if [[ -f /tmp/reduct-bridge-mqtt-it.log ]]; then
+          cat /tmp/reduct-bridge-mqtt-it.log || true
+        else
+          echo "bridge log file not found: /tmp/reduct-bridge-mqtt-it.log"
+        fi
+
+    - name: Print MQTT broker logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [mqtt-it] Final logs: mqtt broker ==="
+        if [[ -f /tmp/mqtt-broker-it.log ]]; then
+          cat /tmp/mqtt-broker-it.log || true
+        else
+          echo "mqtt broker log file not found: /tmp/mqtt-broker-it.log"
+        fi
+
+    - name: Print reductstore logs
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "=== [mqtt-it] Final logs: reductstore ==="
+        docker logs reduct-store-mqtt-it || true

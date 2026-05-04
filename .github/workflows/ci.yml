@@ -1,7 +1,7 @@
 name: Build, Test and Release
 on:
   push:
-    branches: [ main, stable ]
+    branches: [main, stable]
     tags:
       - "v*"
     paths-ignore:
@@ -17,7 +17,6 @@ on:
 
 permissions:
   contents: read
-
 
 env:
   REGISTRY_IMAGE: reduct/bridge
@@ -61,6 +60,14 @@ jobs:
             cargo_args: "--no-default-features --features shell,ros2,metrics"
             ros_distro: "humble"
             ros_setup_script: "/opt/ros/humble/setup.bash"
+          - artifact_prefix: "bridge-iot"
+            target: "x86_64-unknown-linux-gnu"
+            os: ubuntu-24.04
+            compiler: "gcc"
+            cargo_args: "--no-default-features --features shell,metrics,iot"
+            ros_distro: ""
+            ros_setup_script: ""
+
     steps:
       - uses: actions/checkout@v4
       - name: Install ROS2
@@ -106,6 +113,10 @@ jobs:
             os: ubuntu-22.04
             ros_distro: "humble"
             ros_setup_script: "/opt/ros/humble/setup.bash"
+          - artifact_prefix: "bridge-iot"
+            os: ubuntu-24.04
+            ros_distro: ""
+            ros_setup_script: ""
     timeout-minutes: 10
     env:
       RUST_BACKTRACE: 1
@@ -172,6 +183,31 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - uses: ./.github/actions/shell-input-smoke
+        with:
+          bridge_binary: ./tmp/reduct-bridge/reduct-bridge
+
+  mqtt_input_integration:
+    name: MQTT Input Integration
+    needs:
+      - rust_fmt
+      - build_binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download reduct-bridge Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-iot-x86_64-unknown-linux-gnu
+          path: ./tmp/reduct-bridge
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Install Mosquitto
+        run: sudo apt-get update && sudo apt-get install -y mosquitto mosquitto-clients
+
+      - uses: ./.github/actions/mqtt-input-smoke
         with:
           bridge_binary: ./tmp/reduct-bridge/reduct-bridge
 
@@ -248,7 +284,6 @@ jobs:
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
-
   build_test_docker_image:
     name: Build Docker image
     runs-on: ubuntu-22.04
@@ -268,6 +303,9 @@ jobs:
           - image_artifact_name: image-ros2-humble-linux-amd64
             bridge_artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
             image_tag: reduct/bridge:ros2-humble-test
+          - image_artifact_name: image-iot-linux-amd64
+            bridge_artifact_name: bridge-iot-x86_64-unknown-linux-gnu
+            image_tag: reduct/bridge:iot-test
     steps:
       - uses: actions/checkout@v4
 
@@ -287,6 +325,7 @@ jobs:
       - ros1_input_integration
       - ros2_input_integration
       - shell_input_integration
+      - mqtt_input_integration
     steps:
       - name: Confirm all test jobs passed
         run: echo "All unit and integration tests passed"
@@ -351,6 +390,8 @@ jobs:
             asset_name: bridge-ros2-jazzy.x86_64-unknown-linux-gnu.tar.gz
           - artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
             asset_name: bridge-ros2-humble.x86_64-unknown-linux-gnu.tar.gz
+          - artifact_name: bridge-iot-x86_64-unknown-linux-gnu
+            asset_name: bridge-iot.x86_64-unknown-linux-gnu.tar.gz
     steps:
       - uses: actions/checkout@v4
       - name: Download ${{ matrix.artifact_name }} artifact
@@ -399,6 +440,11 @@ jobs:
             bridge_artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
             image_name: reduct/bridge
             image_suffix: ros2-humble
+          - platform: linux/amd64
+            cargo_target: x86_64-unknown-linux-gnu
+            bridge_artifact_name: bridge-iot-x86_64-unknown-linux-gnu
+            image_name: reduct/bridge
+            image_suffix: iot
 
     steps:
       - uses: actions/checkout@v4
@@ -426,7 +472,7 @@ jobs:
           bridge_artifact_name: ${{ matrix.bridge_artifact_name }}
           image_tag: ${{ matrix.image_name }}
           docker_labels: ${{ steps.meta.outputs.labels }}
-          upload_artifact: 'false'
+          upload_artifact: "false"
           build_outputs: type=image,name=${{ matrix.image_name }},push=true
 
   snap_release:
@@ -438,7 +484,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [ros1, ros2]
+        variant: [ros1, ros2, iot]
     steps:
       - uses: actions/checkout@v4
       - id: snap
