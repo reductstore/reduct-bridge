@@ -95,6 +95,7 @@ To build additional inputs explicitly from source:
 
 ```bash
 cargo build --no-default-features --features ros1
+cargo build --no-default-features --features shell,metrics,iot
 cargo build --no-default-features --features all-inputs
 ```
 

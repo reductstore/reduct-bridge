@@ -2,7 +2,7 @@ name: 'Build Snap Package'
 description: 'Builds reduct-bridge snap variants and exposes the built snap file.'
 inputs:
   variant:
-    description: 'Build variant track (ros1 or ros2).'
+    description: 'Build variant track (ros1, ros2, or iot).'
     required: true
   upload_artifact:
     description: 'Upload built snap as workflow artifact.'
@@ -36,6 +36,12 @@ runs:
             echo "BINARY_ARTIFACT=bridge-ros2-jazzy-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
             echo "SNAP_VARIANT=ros2" >> "$GITHUB_ENV"
             echo "SNAP_ROS_DISTRO=jazzy" >> "$GITHUB_ENV"
+            ;;
+          iot)
+            echo "SNAP_TITLE=ReductBridge for IIoT" >> "$GITHUB_ENV"
+            echo "SNAP_NAME=reduct-bridge-iot" >> "$GITHUB_ENV"
+            echo "BINARY_ARTIFACT=bridge-iot-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
+            echo "SNAP_VARIANT=iot" >> "$GITHUB_ENV"
             ;;
           *)
             echo "Unsupported variant: ${{ inputs.variant }}"
