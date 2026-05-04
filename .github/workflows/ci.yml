@@ -204,6 +204,9 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Install Mosquitto
+        run: sudo apt-get update && sudo apt-get install -y mosquitto mosquitto-clients
+
       - uses: ./.github/actions/mqtt-input-smoke
         with:
           bridge_binary: ./tmp/reduct-bridge/reduct-bridge

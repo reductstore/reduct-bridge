@@ -19,14 +19,15 @@ runs:
         set -euo pipefail
 
         BRIDGE_BIN="${{ inputs.bridge_binary }}"
-        MQTT_CONTAINER="mqtt-broker-it"
+        MQTT_PID_FILE="/tmp/mqtt-broker-it.pid"
         REDUCT_URL="http://127.0.0.1:8383"
         BUCKET="mqtt-it"
         BRIDGE_CFG="${GITHUB_WORKSPACE}/.github/configs/mqtt_input_it.toml"
         BRIDGE_LOG="/tmp/reduct-bridge-mqtt-it.log"
+        MQTT_LOG="/tmp/mqtt-broker-it.log"
 
-        rm -f /tmp/reduct-bridge-mqtt-it.pid "$BRIDGE_LOG"
-        docker rm -f "$MQTT_CONTAINER" >/dev/null 2>&1 || true
+        rm -f /tmp/reduct-bridge-mqtt-it.pid "$MQTT_PID_FILE" "$BRIDGE_LOG" "$MQTT_LOG"
+        pkill -x mosquitto >/dev/null 2>&1 || true
 
         echo "=== [mqtt-it] Creating bucket via ReductStore API ==="
         curl -sf -X POST "${REDUCT_URL}/api/v1/b/${BUCKET}" \
@@ -34,11 +35,9 @@ runs:
           -d '{}' >/dev/null || true
 
         echo "=== [mqtt-it] Starting MQTT broker ==="
-        docker run -d --rm --name "$MQTT_CONTAINER" \
-          -p 1883:1883 \
-          -v "${GITHUB_WORKSPACE}/testing/mqtt-local:/mosquitto/config:ro" \
-          eclipse-mosquitto:2 \
-          mosquitto -c /mosquitto/config/mosquitto.conf
+        mosquitto -c "${GITHUB_WORKSPACE}/testing/mqtt-local/mosquitto.conf" -v >"$MQTT_LOG" 2>&1 &
+        MQTT_PID=$!
+        echo "$MQTT_PID" >"$MQTT_PID_FILE"
         sleep 3
 
         echo "=== [mqtt-it] Starting reduct-bridge in debug mode ==="
@@ -49,8 +48,7 @@ runs:
         sleep 4
 
         echo "=== [mqtt-it] Publishing MQTT v5 payload with user properties ==="
-        docker run --rm --network host eclipse-mosquitto:2 \
-          mosquitto_pub -h 127.0.0.1 -p 1883 -V mqttv5 \
+        mosquitto_pub -h 127.0.0.1 -p 1883 -V mqttv5 \
           -t test/v5 \
           -m '{"device_id":"dev-9","site":"lab"}' \
           -D PUBLISH user-property tenant acme \
@@ -106,6 +104,10 @@ runs:
           echo "$mqtt_payload"
           exit 1
         fi
+        if [[ -f "$MQTT_PID_FILE" ]]; then
+          kill "$(cat "$MQTT_PID_FILE")" >/dev/null 2>&1 || true
+          rm -f "$MQTT_PID_FILE"
+        fi
         echo "=== [mqtt-it] Verification passed: MQTT record has payload and labels ==="
 
     - name: Print reduct-bridge logs
@@ -124,7 +126,11 @@ runs:
       shell: bash
       run: |
         echo "=== [mqtt-it] Final logs: mqtt broker ==="
-        docker logs mqtt-broker-it || true
+        if [[ -f /tmp/mqtt-broker-it.log ]]; then
+          cat /tmp/mqtt-broker-it.log || true
+        else
+          echo "mqtt broker log file not found: /tmp/mqtt-broker-it.log"
+        fi
 
     - name: Print reductstore logs
       if: ${{ always() }}
