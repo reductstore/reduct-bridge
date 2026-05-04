@@ -11,7 +11,8 @@ ros1 = ["dep:rosrust"]
 ros2 = ["dep:rclrs", "dep:ros2_message"]
 shell = []
 metrics = ["dep:systemstat"]
-iot = ["dep:rumqttc", "dep:rustls"]
+mqtt = ["dep:rumqttc", "dep:rustls"]
+iot = ["mqtt"]
 ci = []
 
 

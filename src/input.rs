@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "iot")]
-mod iot;
 #[cfg(feature = "metrics")]
 mod metrics;
+#[cfg(feature = "mqtt")]
+mod mqtt;
 #[cfg(feature = "ros1")]
 mod ros1;
 #[cfg(feature = "ros2")]
@@ -85,11 +85,11 @@ impl InputBuilder {
                 let launcher = metrics::MetricsInstance::new(input_cfg);
                 launcher.launch(pipeline_tx).await
             }
-            #[cfg(feature = "iot")]
+            #[cfg(feature = "mqtt")]
             "mqtt" => {
-                let input_cfg: iot::mqtt::MqttConfig = parse_entry(input_table)?;
+                let input_cfg: mqtt::MqttConfig = parse_entry(input_table)?;
                 debug!("Creating MQTT launcher for input '{}'", input_name);
-                let launcher = iot::mqtt::MqttInstance::new(input_cfg);
+                let launcher = mqtt::MqttInstance::new(input_cfg);
                 launcher.launch(pipeline_tx).await
             }
             _ => bail!(

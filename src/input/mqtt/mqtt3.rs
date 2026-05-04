@@ -1,7 +1,6 @@
 use super::{
     BrokerScheme, MqttConfig, ParsedBroker, build_payload_labels, current_timestamp_us,
     ensure_rustls_crypto_provider, find_topic_config, reconnect_retry_delay, resolve_entry_name,
-    should_warn_retry,
 };
 use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
@@ -88,7 +87,6 @@ pub(super) async fn launch_v3(
     let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
     let task = tokio::spawn(async move {
         let mut consecutive_errors = 0u32;
-        let mut last_warning_at = None;
         loop {
             tokio::select! {
                 maybe_message = rx.recv() => {
@@ -131,21 +129,11 @@ pub(super) async fn launch_v3(
                         }
                         Err(err) => {
                             let retry_delay = reconnect_retry_delay(consecutive_errors);
-                            let now = std::time::Instant::now();
-                            if should_warn_retry(last_warning_at, now) {
-                                error!(
-                                    "MQTT v3 event loop error: {}. Retrying in {:?}",
-                                    err,
-                                    retry_delay
-                                );
-                                last_warning_at = Some(now);
-                            } else {
-                                debug!(
-                                    "MQTT v3 event loop error: {}. Retrying in {:?}",
-                                    err,
-                                    retry_delay
-                                );
-                            }
+                            error!(
+                                "MQTT v3 event loop error: {}. Retrying in {:?}",
+                                err,
+                                retry_delay
+                            );
                             consecutive_errors = consecutive_errors.saturating_add(1);
                             sleep(retry_delay).await;
                         }

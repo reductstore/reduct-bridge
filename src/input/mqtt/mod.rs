@@ -24,7 +24,7 @@ use log::info;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::Sender;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -163,10 +163,6 @@ pub(super) fn reconnect_retry_delay(consecutive_errors: u32) -> Duration {
         4 => Duration::from_secs(2),
         _ => Duration::from_secs(5),
     }
-}
-
-pub(super) fn should_warn_retry(last_warning_at: Option<Instant>, now: Instant) -> bool {
-    last_warning_at.is_none_or(|last| now.duration_since(last) >= Duration::from_secs(30))
 }
 
 pub(super) fn entry_name(prefix: &str, topic: &str) -> String {
@@ -346,9 +342,11 @@ mod tests {
         parse_broker, resolve_entry_name,
     };
     use bytes::Bytes;
+    use rstest::{fixture, rstest};
     use rumqttc::v5::mqttbytes::v5::{Publish as V5Publish, PublishProperties};
     use std::collections::HashMap;
 
+    #[fixture]
     fn mqtt_cfg() -> MqttConfig {
         MqttConfig {
             broker: "mqtt://localhost:1883".to_string(),
@@ -365,6 +363,42 @@ mod tests {
             password: None,
             entry_prefix: "mqtt".to_string(),
         }
+    }
+
+    fn set_empty_broker(cfg: &mut MqttConfig) {
+        cfg.broker = "   ".to_string();
+    }
+
+    fn set_empty_client_id(cfg: &mut MqttConfig) {
+        cfg.client_id.clear();
+    }
+
+    fn clear_topics(cfg: &mut MqttConfig) {
+        cfg.topics.clear();
+    }
+
+    fn set_invalid_qos(cfg: &mut MqttConfig) {
+        cfg.qos = 3;
+    }
+
+    fn set_password_without_username(cfg: &mut MqttConfig) {
+        cfg.password = Some("secret".to_string());
+    }
+
+    fn add_v3_property_rule(cfg: &mut MqttConfig) {
+        cfg.version = MqttVersion::V3;
+        cfg.topics[0].labels.push(MqttLabelRule::Property {
+            property: "content_type".to_string(),
+            label: "content_type".to_string(),
+        });
+    }
+
+    fn set_empty_topic_entry_name(cfg: &mut MqttConfig) {
+        cfg.topics[0].entry_name = Some(" ".to_string());
+    }
+
+    fn set_empty_topic_content_type(cfg: &mut MqttConfig) {
+        cfg.topics[0].content_type = Some(" ".to_string());
     }
 
     #[test]
@@ -384,88 +418,33 @@ mod tests {
         assert_eq!(cfg.topics[0].labels.len(), 1);
     }
 
-    #[test]
-    fn rejects_empty_broker() {
-        let mut cfg = mqtt_cfg();
-        cfg.broker = "   ".to_string();
+    #[rstest]
+    #[case::empty_broker(set_empty_broker, "broker must not be empty")]
+    #[case::empty_client_id(set_empty_client_id, "client_id must not be empty")]
+    #[case::missing_topics(clear_topics, "requires at least one topic")]
+    #[case::invalid_qos(set_invalid_qos, "qos must be 0, 1, or 2")]
+    #[case::password_without_username(set_password_without_username, "password requires username")]
+    #[case::property_rule_for_v3(add_v3_property_rule, "does not support property label rules")]
+    #[case::empty_topic_entry_name(
+        set_empty_topic_entry_name,
+        "topic entry_name must not be empty"
+    )]
+    #[case::empty_topic_content_type(
+        set_empty_topic_content_type,
+        "topic content_type must not be empty"
+    )]
+    fn rejects_invalid_configs(
+        #[case] mutate: fn(&mut MqttConfig),
+        #[case] expected_error: &str,
+        mut mqtt_cfg: MqttConfig,
+    ) {
+        mutate(&mut mqtt_cfg);
 
-        let err = MqttInstance::validate_config(&cfg).unwrap_err().to_string();
+        let err = MqttInstance::validate_config(&mqtt_cfg)
+            .unwrap_err()
+            .to_string();
 
-        assert!(err.contains("broker must not be empty"));
-    }
-
-    #[test]
-    fn rejects_empty_client_id() {
-        let mut cfg = mqtt_cfg();
-        cfg.client_id = "".to_string();
-
-        let err = MqttInstance::validate_config(&cfg).unwrap_err().to_string();
-
-        assert!(err.contains("client_id must not be empty"));
-    }
-
-    #[test]
-    fn rejects_missing_topics() {
-        let mut cfg = mqtt_cfg();
-        cfg.topics.clear();
-
-        let err = MqttInstance::validate_config(&cfg).unwrap_err().to_string();
-
-        assert!(err.contains("requires at least one topic"));
-    }
-
-    #[test]
-    fn rejects_invalid_qos() {
-        let mut cfg = mqtt_cfg();
-        cfg.qos = 3;
-
-        let err = MqttInstance::validate_config(&cfg).unwrap_err().to_string();
-
-        assert!(err.contains("qos must be 0, 1, or 2"));
-    }
-
-    #[test]
-    fn rejects_password_without_username() {
-        let mut cfg = mqtt_cfg();
-        cfg.password = Some("secret".to_string());
-
-        let err = MqttInstance::validate_config(&cfg).unwrap_err().to_string();
-
-        assert!(err.contains("password requires username"));
-    }
-
-    #[test]
-    fn rejects_property_rules_for_v3() {
-        let mut cfg = mqtt_cfg();
-        cfg.version = MqttVersion::V3;
-        cfg.topics[0].labels.push(MqttLabelRule::Property {
-            property: "content_type".to_string(),
-            label: "content_type".to_string(),
-        });
-
-        let err = MqttInstance::validate_config(&cfg).unwrap_err().to_string();
-
-        assert!(err.contains("does not support property label rules"));
-    }
-
-    #[test]
-    fn rejects_empty_topic_entry_name() {
-        let mut cfg = mqtt_cfg();
-        cfg.topics[0].entry_name = Some(" ".to_string());
-
-        let err = MqttInstance::validate_config(&cfg).unwrap_err().to_string();
-
-        assert!(err.contains("topic entry_name must not be empty"));
-    }
-
-    #[test]
-    fn rejects_empty_topic_content_type() {
-        let mut cfg = mqtt_cfg();
-        cfg.topics[0].content_type = Some(" ".to_string());
-
-        let err = MqttInstance::validate_config(&cfg).unwrap_err().to_string();
-
-        assert!(err.contains("topic content_type must not be empty"));
+        assert!(err.contains(expected_error));
     }
 
     #[test]
@@ -531,85 +510,74 @@ mod tests {
         );
     }
 
-    #[test]
-    fn parses_mqtt_broker_with_default_port() {
-        let broker = parse_broker("mqtt://localhost").unwrap();
+    #[rstest]
+    #[case("mqtt://localhost", BrokerScheme::Mqtt, "localhost", 1883)]
+    #[case("mqtt://localhost:1884", BrokerScheme::Mqtt, "localhost", 1884)]
+    #[case(
+        "mqtts://broker.example.com",
+        BrokerScheme::Mqtts,
+        "broker.example.com",
+        8883
+    )]
+    fn parses_broker_variants(
+        #[case] broker_url: &str,
+        #[case] expected_scheme: BrokerScheme,
+        #[case] expected_host: &str,
+        #[case] expected_port: u16,
+    ) {
+        let broker = parse_broker(broker_url).unwrap();
 
-        assert_eq!(broker.scheme, BrokerScheme::Mqtt);
-        assert_eq!(broker.host, "localhost");
-        assert_eq!(broker.port, 1883);
+        assert_eq!(broker.scheme, expected_scheme);
+        assert_eq!(broker.host, expected_host);
+        assert_eq!(broker.port, expected_port);
     }
 
-    #[test]
-    fn parses_mqtt_broker_with_explicit_port() {
-        let broker = parse_broker("mqtt://localhost:1884").unwrap();
-
-        assert_eq!(broker.scheme, BrokerScheme::Mqtt);
-        assert_eq!(broker.host, "localhost");
-        assert_eq!(broker.port, 1884);
-    }
-
-    #[test]
-    fn parses_mqtts_broker_with_default_port() {
+    #[rstest]
+    fn builds_v3_options_with_tls_for_mqtts(mqtt_cfg: MqttConfig) {
         let broker = parse_broker("mqtts://broker.example.com").unwrap();
 
-        assert_eq!(broker.scheme, BrokerScheme::Mqtts);
-        assert_eq!(broker.host, "broker.example.com");
-        assert_eq!(broker.port, 8883);
-    }
-
-    #[test]
-    fn builds_v3_options_with_tls_for_mqtts() {
-        let cfg = mqtt_cfg();
-        let broker = parse_broker("mqtts://broker.example.com").unwrap();
-
-        let options = mqtt3::build_v3_options(&cfg, &broker);
+        let options = mqtt3::build_v3_options(&mqtt_cfg, &broker);
 
         assert!(matches!(options.transport(), rumqttc::Transport::Tls(_)));
     }
 
-    #[test]
-    fn builds_v5_options_with_tls_for_mqtts() {
-        let cfg = mqtt_cfg();
+    #[rstest]
+    fn builds_v5_options_with_tls_for_mqtts(mqtt_cfg: MqttConfig) {
         let broker = parse_broker("mqtts://broker.example.com").unwrap();
 
-        let options = mqtt5::build_v5_options(&cfg, &broker);
+        let options = mqtt5::build_v5_options(&mqtt_cfg, &broker);
 
         assert!(matches!(options.transport(), rumqttc::Transport::Tls(_)));
     }
 
-    #[test]
-    fn rejects_unsupported_broker_scheme() {
-        let err = parse_broker("http://localhost").unwrap_err().to_string();
+    #[rstest]
+    #[case("http://localhost", "Unsupported MQTT broker scheme")]
+    #[case("mqtt://:1883", "must have a host")]
+    fn rejects_invalid_brokers(#[case] broker_url: &str, #[case] expected_error: &str) {
+        let err = parse_broker(broker_url).unwrap_err().to_string();
 
-        assert!(err.contains("Unsupported MQTT broker scheme"));
+        assert!(err.contains(expected_error));
     }
 
-    #[test]
-    fn rejects_broker_without_host() {
-        let err = parse_broker("mqtt://:1883").unwrap_err().to_string();
-
-        assert!(err.contains("must have a host"));
+    #[rstest]
+    #[case(0, rumqttc::QoS::AtMostOnce)]
+    #[case(1, rumqttc::QoS::AtLeastOnce)]
+    #[case(2, rumqttc::QoS::ExactlyOnce)]
+    fn converts_qos_levels(#[case] qos: u8, #[case] expected: rumqttc::QoS) {
+        assert_eq!(mqtt3::mqtt_qos(qos).unwrap(), expected);
     }
 
-    #[test]
-    fn converts_qos_levels() {
-        assert_eq!(mqtt3::mqtt_qos(0).unwrap(), rumqttc::QoS::AtMostOnce);
-        assert_eq!(mqtt3::mqtt_qos(1).unwrap(), rumqttc::QoS::AtLeastOnce);
-        assert_eq!(mqtt3::mqtt_qos(2).unwrap(), rumqttc::QoS::ExactlyOnce);
-    }
-
-    #[test]
-    fn rejects_invalid_qos_level() {
-        let err = mqtt3::mqtt_qos(3).unwrap_err().to_string();
+    #[rstest]
+    #[case(3)]
+    fn rejects_invalid_qos_level(#[case] qos: u8) {
+        let err = mqtt3::mqtt_qos(qos).unwrap_err().to_string();
 
         assert!(err.contains("Invalid MQTT QoS level"));
     }
 
-    #[test]
-    fn builds_payload_labels_from_static_and_json_rules() {
-        let mut cfg = mqtt_cfg();
-        cfg.topics[0].labels = vec![
+    #[fixture]
+    fn mqtt_cfg_with_payload_labels(mut mqtt_cfg: MqttConfig) -> MqttConfig {
+        mqtt_cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
                 field: "device_id".to_string(),
                 label: "device".to_string(),
@@ -622,9 +590,13 @@ mod tests {
                 r#static: HashMap::from([("source".to_string(), "mqtt".to_string())]),
             },
         ];
+        mqtt_cfg
+    }
 
+    #[rstest]
+    fn builds_payload_labels_from_static_and_json_rules(mqtt_cfg_with_payload_labels: MqttConfig) {
         let labels = build_payload_labels(
-            &cfg.topics[0],
+            &mqtt_cfg_with_payload_labels.topics[0],
             br#"{"device_id":"dev-1","site":"lab"}"#,
             HashMap::new(),
         );
@@ -634,20 +606,13 @@ mod tests {
         assert_eq!(labels.get("source"), Some(&"mqtt".to_string()));
     }
 
-    #[test]
-    fn skips_json_labels_when_payload_is_not_json() {
-        let mut cfg = mqtt_cfg();
-        cfg.topics[0].labels = vec![
-            MqttLabelRule::Field {
-                field: "device_id".to_string(),
-                label: "device".to_string(),
-            },
-            MqttLabelRule::Static {
-                r#static: HashMap::from([("source".to_string(), "mqtt".to_string())]),
-            },
-        ];
-
-        let labels = build_payload_labels(&cfg.topics[0], b"plain text payload", HashMap::new());
+    #[rstest]
+    fn skips_json_labels_when_payload_is_not_json(mqtt_cfg_with_payload_labels: MqttConfig) {
+        let labels = build_payload_labels(
+            &mqtt_cfg_with_payload_labels.topics[0],
+            b"plain text payload",
+            HashMap::new(),
+        );
 
         assert_eq!(labels.get("device"), None);
         assert_eq!(labels.get("source"), Some(&"mqtt".to_string()));
