@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MQTT input for MQTT v3/v5 with payload/topic labels and optional JSON-schema attachments, [PR-24](https://github.com/reductstore/reduct-bridge/pull/24)
+
 ## 0.1.2 - 2026-03-30
 
 ### Added
