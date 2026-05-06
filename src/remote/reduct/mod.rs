@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#[cfg(any(feature = "ros1", feature = "ros2"))]
+#[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
 use crate::message::Attachment;
 use crate::message::{Message, Record};
 use crate::remote::RemoteInstanceLauncher;
@@ -130,7 +130,7 @@ impl ReductInstance {
         }
     }
 
-    #[cfg(any(feature = "ros1", feature = "ros2"))]
+    #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
     async fn write_attachment(cfg: &RemoteConfig, bucket: &Bucket, attachment: Attachment) {
         let Some(entry) = Self::normalize_entry_path(&cfg.prefix, &attachment.entry_name) else {
             warn!(
@@ -142,7 +142,10 @@ impl ReductInstance {
 
         let mut attachments = std::collections::HashMap::new();
         attachments.insert(attachment.key, attachment.payload);
-        if let Err(err) = bucket.write_attachments(&entry, attachments, None).await {
+        if let Err(err) = bucket
+            .write_attachments(&entry, attachments, attachment.content_type.as_deref())
+            .await
+        {
             warn!("Failed to write attachment for entry '{}': {}", entry, err);
         }
     }
@@ -203,7 +206,7 @@ impl RemoteInstanceLauncher for ReductInstance {
                                     }
                                 }
                             }
-                            #[cfg(any(feature = "ros1", feature = "ros2"))]
+                            #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
                             Some(Message::Attachment(attachment)) => {
                                 Self::write_attachment(&cfg, &bucket, attachment).await;
                             }

@@ -101,6 +101,7 @@ impl TopicRuntime {
             entry_name: self.entry_name.clone(),
             key: "$ros".to_string(),
             payload: attachment_payload,
+            content_type: None,
         };
         if let Err(err) = self
             .pipeline_tx

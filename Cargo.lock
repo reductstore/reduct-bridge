@@ -1674,6 +1674,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
+name = "ordered-float"
+version = "2.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1799,6 +1808,52 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "version_check",
+]
+
+[[package]]
+name = "prost"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
+dependencies = [
+ "bytes",
+ "prost-derive",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
+dependencies = [
+ "anyhow",
+ "itertools 0.14.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "prost-reflect"
+version = "0.14.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b5edd582b62f5cde844716e66d92565d7faf7ab1445c8cebce6e00fba83ddb2"
+dependencies = [
+ "base64",
+ "once_cell",
+ "prost",
+ "prost-types",
+ "serde",
+ "serde-value",
+]
+
+[[package]]
+name = "prost-types"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
+dependencies = [
+ "prost",
 ]
 
 [[package]]
@@ -1944,9 +1999,9 @@ dependencies = [
 
 [[package]]
 name = "reduct-base"
-version = "1.19.0"
+version = "1.19.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f788e536efd91cd374fc93d143f829a962763cc058fc14970962a5b14881f87"
+checksum = "4c1a65d672f28500f7f25663f2b5e6e7735d4528d9bf9cfc1e1895a67e0662ed"
 dependencies = [
  "bytes",
  "chrono",
@@ -1966,10 +2021,13 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64",
  "bytes",
  "env_logger",
  "futures-util",
  "log",
+ "prost",
+ "prost-reflect",
  "rclrs",
  "reduct-rs",
  "regex",
@@ -1988,11 +2046,12 @@ dependencies = [
 
 [[package]]
 name = "reduct-rs"
-version = "1.19.0"
-source = "git+https://github.com/reductstore/reduct-rs.git#831e9072011866c421b071e66264a305099df675"
+version = "1.19.1"
+source = "git+https://github.com/reductstore/reduct-rs.git#03434c28872d55acbf00ec7b6b37901763428543"
 dependencies = [
  "async-channel 2.5.0",
  "async-stream",
+ "base64",
  "bytes",
  "chrono",
  "futures",
@@ -2479,6 +2538,16 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
+]
+
+[[package]]
+name = "serde-value"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
+dependencies = [
+ "ordered-float",
+ "serde",
 ]
 
 [[package]]
