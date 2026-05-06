@@ -1,11 +1,13 @@
 use super::{
-    BrokerScheme, MqttConfig, ParsedBroker, build_payload_labels, current_timestamp_us,
-    ensure_rustls_crypto_provider, find_topic_config, reconnect_retry_delay, resolve_entry_name,
+    BrokerScheme, DescriptorMap, MqttConfig, ParsedBroker, build_payload_labels,
+    current_timestamp_us, emit_proto_attachment, ensure_rustls_crypto_provider, find_topic_config,
+    reconnect_retry_delay, resolve_entry_name,
 };
 use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
 use log::{debug, error, info, warn};
+use std::collections::HashSet;
 use tokio::sync::mpsc::{Sender, channel};
 use tokio::time::sleep;
 
@@ -37,9 +39,18 @@ pub(super) fn build_v3_options(cfg: &MqttConfig, broker: &ParsedBroker) -> rumqt
     options
 }
 
-pub(super) fn build_v3_record(cfg: &MqttConfig, publish: &rumqttc::Publish) -> Record {
+pub(super) fn build_v3_record(
+    cfg: &MqttConfig,
+    publish: &rumqttc::Publish,
+    descriptors: &DescriptorMap,
+) -> Record {
     let topic_cfg = find_topic_config(cfg, &publish.topic)
         .expect("received MQTT v3 publish for unsubscribed topic");
+
+    let descriptor_pool = topic_cfg
+        .proto_descriptor
+        .as_ref()
+        .and_then(|path| descriptors.get(path));
 
     Record {
         timestamp_us: current_timestamp_us(),
@@ -50,6 +61,7 @@ pub(super) fn build_v3_record(cfg: &MqttConfig, publish: &rumqttc::Publish) -> R
             topic_cfg,
             publish.payload.as_ref(),
             std::collections::HashMap::new(),
+            descriptor_pool,
         ),
     }
 }
@@ -70,6 +82,7 @@ pub(super) async fn launch_v3(
     broker: ParsedBroker,
     qos: rumqttc::QoS,
     pipeline_tx: Sender<Message>,
+    descriptors: DescriptorMap,
 ) -> Result<ComponentRuntime, Error> {
     let options = build_v3_options(&cfg, &broker);
     let (client, mut eventloop) = rumqttc::AsyncClient::new(options, CHANNEL_SIZE);
@@ -87,6 +100,7 @@ pub(super) async fn launch_v3(
     let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
     let task = tokio::spawn(async move {
         let mut consecutive_errors = 0u32;
+        let mut attached_entries: HashSet<String> = HashSet::new();
         loop {
             tokio::select! {
                 maybe_message = rx.recv() => {
@@ -109,7 +123,10 @@ pub(super) async fn launch_v3(
                         Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish))) => {
                             consecutive_errors = 0;
                             debug!("Received MQTT v3 publish on topic '{}'", publish.topic);
-                            let record = build_v3_record(&cfg, &publish);
+                            let record = build_v3_record(&cfg, &publish, &descriptors);
+                            if let Some(topic_cfg) = find_topic_config(&cfg, &publish.topic) {
+                                emit_proto_attachment(topic_cfg, &record.entry_name, &mut attached_entries, &pipeline_tx).await;
+                            }
                             if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
                                 warn!("Failed to send MQTT v3 record to pipeline: {}", err);
                             }

@@ -16,14 +16,19 @@ mod mqtt3;
 mod mqtt5;
 
 use crate::formats::json::{extract_json_path, value_to_label};
+use crate::formats::protobuf::{self, extract_field_by_id};
 use crate::input::InputLauncher;
+use crate::message::{Attachment, Message};
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
-use log::info;
+use log::{info, warn};
+use prost_reflect::DescriptorPool;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::Sender;
 
@@ -61,15 +66,32 @@ pub struct MqttTopicConfig {
     #[serde(default)]
     pub content_type: Option<String>,
     #[serde(default)]
+    pub proto_descriptor: Option<String>,
+    #[serde(default)]
+    pub proto_message: Option<String>,
+    #[serde(default)]
     pub labels: Vec<MqttLabelRule>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum MqttLabelRule {
-    Field { field: String, label: String },
-    Property { property: String, label: String },
-    Static { r#static: HashMap<String, String> },
+    ProtoField {
+        field_id: u32,
+        field_type: String,
+        label: String,
+    },
+    Field {
+        field: String,
+        label: String,
+    },
+    Property {
+        property: String,
+        label: String,
+    },
+    Static {
+        r#static: HashMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,6 +154,12 @@ impl MqttInstance {
                     .any(|rule| matches!(rule, MqttLabelRule::Property { .. }))
             {
                 bail!("MQTT v3 input does not support property label rules");
+            }
+            if topic.proto_descriptor.is_some() != topic.proto_message.is_some() {
+                bail!(
+                    "MQTT topic '{}': proto_descriptor and proto_message must both be set or both omitted",
+                    topic.name
+                );
             }
         }
 
@@ -269,9 +297,17 @@ pub(super) fn build_payload_labels(
     topic_cfg: &MqttTopicConfig,
     payload: &[u8],
     property_labels: HashMap<String, String>,
+    descriptor_pool: Option<&DescriptorPool>,
 ) -> HashMap<String, String> {
     let mut labels = build_static_labels(&topic_cfg.labels);
-    let json = serde_json::from_slice::<Value>(payload).ok();
+
+    let json = if let (Some(pool), Some(message_name)) =
+        (descriptor_pool, topic_cfg.proto_message.as_deref())
+    {
+        protobuf::decode_protobuf(pool, message_name, payload)
+    } else {
+        serde_json::from_slice::<Value>(payload).ok()
+    };
 
     for rule in &topic_cfg.labels {
         match rule {
@@ -280,6 +316,15 @@ pub(super) fn build_payload_labels(
                     if let Some(value) = extract_json_path(json, field) {
                         labels.insert(label.clone(), value_to_label(value));
                     }
+                }
+            }
+            MqttLabelRule::ProtoField {
+                field_id,
+                field_type,
+                label,
+            } => {
+                if let Some(value) = extract_field_by_id(payload, *field_id, field_type) {
+                    labels.insert(label.clone(), value);
                 }
             }
             MqttLabelRule::Property { label, .. } => {
@@ -291,7 +336,55 @@ pub(super) fn build_payload_labels(
         }
     }
 
+    if let Some(message_name) = &topic_cfg.proto_message {
+        labels.insert("proto_message".to_string(), message_name.clone());
+    }
+
     labels
+}
+
+pub(super) type DescriptorMap = Arc<HashMap<String, DescriptorPool>>;
+
+pub(super) async fn emit_proto_attachment(
+    topic_cfg: &MqttTopicConfig,
+    entry_name: &str,
+    attached_entries: &mut HashSet<String>,
+    pipeline_tx: &Sender<Message>,
+) {
+    let desc_path = match &topic_cfg.proto_descriptor {
+        Some(p) => p,
+        None => return,
+    };
+    if attached_entries.contains(entry_name) {
+        return;
+    }
+    let b64 = match protobuf::load_descriptor_base64(desc_path) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    let attachment = Attachment {
+        entry_name: entry_name.to_string(),
+        key: "$proto".to_string(),
+        payload: serde_json::Value::String(b64),
+        content_type: Some("application/octet-stream".to_string()),
+    };
+    if let Err(err) = pipeline_tx.send(Message::Attachment(attachment)).await {
+        warn!("Failed to send proto descriptor attachment: {}", err);
+    }
+    attached_entries.insert(entry_name.to_string());
+}
+
+fn load_descriptors(cfg: &MqttConfig) -> Result<DescriptorMap> {
+    let mut map = HashMap::new();
+    for topic in &cfg.topics {
+        if let Some(path) = &topic.proto_descriptor {
+            if !map.contains_key(path) {
+                let pool = protobuf::load_descriptor(path)?;
+                map.insert(path.clone(), pool);
+            }
+        }
+    }
+    Ok(Arc::new(map))
 }
 
 pub(super) fn ensure_rustls_crypto_provider() {
@@ -310,6 +403,8 @@ impl InputLauncher for MqttInstance {
         let cfg = self.cfg.clone();
         Self::validate_config(&cfg)?;
 
+        let descriptors = load_descriptors(&cfg)?;
+
         info!(
             "Launching MQTT input for broker '{}' with {} topic(s) and client '{}'",
             cfg.broker,
@@ -323,12 +418,12 @@ impl InputLauncher for MqttInstance {
             MqttVersion::V3 => {
                 info!("Using MQTT version 3.1.1");
                 let qos = mqtt3::mqtt_qos(cfg.qos)?;
-                mqtt3::launch_v3(cfg, broker, qos, pipeline_tx).await
+                mqtt3::launch_v3(cfg, broker, qos, pipeline_tx, descriptors).await
             }
             MqttVersion::V5 => {
                 info!("Using MQTT version 5.0");
                 let qos = mqtt5::mqtt_v5_qos(cfg.qos)?;
-                mqtt5::launch_v5(cfg, broker, qos, pipeline_tx).await
+                mqtt5::launch_v5(cfg, broker, qos, pipeline_tx, descriptors).await
             }
         }
     }
@@ -345,6 +440,7 @@ mod tests {
     use rstest::{fixture, rstest};
     use rumqttc::v5::mqttbytes::v5::{Publish as V5Publish, PublishProperties};
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[fixture]
     fn mqtt_cfg() -> MqttConfig {
@@ -356,6 +452,8 @@ mod tests {
                 name: "factory/+/telemetry".to_string(),
                 entry_name: None,
                 content_type: None,
+                proto_descriptor: None,
+                proto_message: None,
                 labels: Vec::new(),
             }],
             qos: 1,
@@ -477,12 +575,16 @@ mod tests {
                     name: "factory/+/events".to_string(),
                     entry_name: None,
                     content_type: None,
+                    proto_descriptor: None,
+                    proto_message: None,
                     labels: Vec::new(),
                 },
                 MqttTopicConfig {
                     name: "factory/+/telemetry".to_string(),
                     entry_name: Some("telemetry".to_string()),
                     content_type: Some("application/json".to_string()),
+                    proto_descriptor: None,
+                    proto_message: None,
                     labels: Vec::new(),
                 },
             ],
@@ -501,6 +603,8 @@ mod tests {
             name: "factory/+/telemetry".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: None,
+            proto_descriptor: None,
+            proto_message: None,
             labels: Vec::new(),
         };
 
@@ -599,6 +703,7 @@ mod tests {
             &mqtt_cfg_with_payload_labels.topics[0],
             br#"{"device_id":"dev-1","site":"lab"}"#,
             HashMap::new(),
+            None,
         );
 
         assert_eq!(labels.get("device"), Some(&"dev-1".to_string()));
@@ -612,6 +717,7 @@ mod tests {
             &mqtt_cfg_with_payload_labels.topics[0],
             b"plain text payload",
             HashMap::new(),
+            None,
         );
 
         assert_eq!(labels.get("device"), None);
@@ -625,6 +731,8 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
+            proto_descriptor: None,
+            proto_message: None,
             labels: Vec::new(),
         }];
         cfg.entry_prefix = "/mqtt".to_string();
@@ -647,7 +755,8 @@ mod tests {
             payload: Bytes::from_static(br#"{"device_id":"dev-1"}"#),
         };
 
-        let record = mqtt3::build_v3_record(&cfg, &publish);
+        let descriptors = Arc::new(HashMap::new());
+        let record = mqtt3::build_v3_record(&cfg, &publish, &descriptors);
 
         assert_eq!(record.entry_name, "mqtt/factory/device-1");
         assert_eq!(
@@ -697,6 +806,8 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: Some("application/json".to_string()),
+            proto_descriptor: None,
+            proto_message: None,
             labels: Vec::new(),
         }];
         cfg.entry_prefix = "/mqtt".to_string();
@@ -729,7 +840,8 @@ mod tests {
             ..Default::default()
         };
 
-        let record = mqtt5::build_v5_record(&cfg, &publish);
+        let descriptors = Arc::new(HashMap::new());
+        let record = mqtt5::build_v5_record(&cfg, &publish, &descriptors);
 
         assert_eq!(record.entry_name, "mqtt/telemetry");
         assert_eq!(
@@ -753,6 +865,8 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
+            proto_descriptor: None,
+            proto_message: None,
             labels: Vec::new(),
         }];
 
@@ -763,7 +877,8 @@ mod tests {
             ..Default::default()
         };
 
-        let record = mqtt5::build_v5_record(&cfg, &publish);
+        let descriptors = Arc::new(HashMap::new());
+        let record = mqtt5::build_v5_record(&cfg, &publish, &descriptors);
 
         assert_eq!(record.content_type, Some("application/json".to_string()));
     }
