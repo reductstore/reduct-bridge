@@ -22,6 +22,8 @@ def gen_fft_bins(n=64):
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="factory-sim")
 client.connect("mosquitto", 1883)
 
+TOPIC_PREFIX = "factory"
+
 lines = ["line-1", "line-2", "line-3"]
 machines = ["cnc-01", "cnc-02", "press-01", "conveyor-03"]
 panels = ["mcc-panel-A", "mcc-panel-B", "dist-panel-1"]
@@ -45,7 +47,9 @@ while True:
             pressure_hpa=1013.0 + random.gauss(0, 0.5),
             timestamp_ms=ts,
         )
-        client.publish(f"factory/{line}/environment", msg.SerializeToString(), qos=0)
+        client.publish(
+            f"{TOPIC_PREFIX}/{line}/environment", msg.SerializeToString(), qos=0
+        )
 
     # Vibration on machines (every 2 ticks)
     if tick % 2 == 0:
@@ -64,7 +68,7 @@ while True:
                     timestamp_ms=ts,
                 )
                 client.publish(
-                    f"factory/machines/{machine}/vibration/{axis}",
+                    f"{TOPIC_PREFIX}/machines/{machine}/vibration/{axis}",
                     msg.SerializeToString(),
                     qos=0,
                 )
@@ -87,7 +91,9 @@ while True:
                 timestamp_ms=ts,
             )
             client.publish(
-                f"factory/electrical/{panel}/power", msg.SerializeToString(), qos=0
+                f"{TOPIC_PREFIX}/electrical/{panel}/power",
+                msg.SerializeToString(),
+                qos=0,
             )
 
     tick += 1
