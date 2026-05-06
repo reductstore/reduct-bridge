@@ -1,0 +1,32 @@
+syntax = "proto3";
+package factory;
+
+message EnvironmentReading {
+  string device_id = 1;
+  string line = 2;
+  double temperature_c = 3;
+  double humidity_pct = 4;
+  double pressure_hpa = 5;
+  uint64 timestamp_ms = 6;
+}
+
+message VibrationSpectrum {
+  string device_id = 1;
+  string machine = 2;
+  string axis = 3;
+  repeated double fft_bins = 4;
+  double rms_velocity = 5;
+  double peak_g = 6;
+  uint64 timestamp_ms = 7;
+}
+
+message PowerReading {
+  string device_id = 1;
+  string panel = 2;
+  double voltage_v = 3;
+  double current_a = 4;
+  double power_w = 5;
+  double energy_kwh = 6;
+  double frequency_hz = 7;
+  uint64 timestamp_ms = 8;
+}

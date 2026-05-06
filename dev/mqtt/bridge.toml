@@ -1,0 +1,29 @@
+[[remotes.reduct]]
+name = "local"
+url = "http://reductstore:8383"
+token_api = ""
+bucket = "proto-test"
+prefix = ""
+
+[inputs.mqtt.main]
+broker = "mqtt://mosquitto:1883"
+client_id = "bridge-dev"
+version = "v5"
+qos = 0
+entry_prefix = ""
+
+[[inputs.mqtt.main.topics]]
+name = "factory/+/environment"
+content_type = "application/protobuf"
+
+[[inputs.mqtt.main.topics]]
+name = "factory/machines/+/vibration/+"
+content_type = "application/protobuf"
+
+[[inputs.mqtt.main.topics]]
+name = "factory/electrical/+/power"
+content_type = "application/protobuf"
+
+[pipelines.main]
+inputs = ["main"]
+remote = "local"

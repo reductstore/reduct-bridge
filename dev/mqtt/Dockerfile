@@ -1,0 +1,7 @@
+FROM python:3.12-slim
+WORKDIR /app
+RUN pip install --no-cache-dir paho-mqtt protobuf grpcio-tools
+COPY factory.proto .
+RUN python -m grpc_tools.protoc --proto_path=. --python_out=. factory.proto
+COPY publish.py .
+CMD ["python", "-u", "publish.py"]
