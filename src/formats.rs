@@ -13,6 +13,8 @@
 // limitations under the License.
 
 pub mod json;
+#[cfg(feature = "mqtt")]
+pub mod protobuf;
 #[cfg(feature = "ros1")]
 pub mod ros1;
 #[cfg(feature = "ros2")]
