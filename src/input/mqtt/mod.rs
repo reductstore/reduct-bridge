@@ -348,16 +348,12 @@ pub(super) type DescriptorMap = Arc<HashMap<String, DescriptorPool>>;
 pub(super) async fn emit_proto_attachment(
     topic_cfg: &MqttTopicConfig,
     entry_name: &str,
-    attached_entries: &mut HashSet<String>,
     pipeline_tx: &Sender<Message>,
 ) {
     let desc_path = match &topic_cfg.proto_descriptor {
         Some(p) => p,
         None => return,
     };
-    if attached_entries.contains(entry_name) {
-        return;
-    }
     let b64 = match protobuf::load_descriptor_base64(desc_path) {
         Ok(b) => b,
         Err(_) => return,
@@ -371,7 +367,6 @@ pub(super) async fn emit_proto_attachment(
     if let Err(err) = pipeline_tx.send(Message::Attachment(attachment)).await {
         warn!("Failed to send proto descriptor attachment: {}", err);
     }
-    attached_entries.insert(entry_name.to_string());
 }
 
 fn load_descriptors(cfg: &MqttConfig) -> Result<DescriptorMap> {

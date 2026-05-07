@@ -173,8 +173,10 @@ pub(super) async fn launch_v5(
                             debug!("Received MQTT v5 publish on topic '{}'", String::from_utf8_lossy(&publish.topic));
                             let record = build_v5_record(&cfg, &publish, &descriptors);
                             let publish_topic = String::from_utf8_lossy(&publish.topic);
-                            if let Some(topic_cfg) = find_topic_config(&cfg, &publish_topic) {
-                                emit_proto_attachment(topic_cfg, &record.entry_name, &mut attached_entries, &pipeline_tx).await;
+                            if let Some(topic_cfg) = find_topic_config(&cfg, &publish_topic)
+                                && attached_entries.insert(record.entry_name.clone())
+                            {
+                                emit_proto_attachment(topic_cfg, &record.entry_name, &pipeline_tx).await;
                             }
                             if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
                                 warn!("Failed to send MQTT v5 record to pipeline: {}", err);

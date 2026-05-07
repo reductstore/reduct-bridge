@@ -124,8 +124,10 @@ pub(super) async fn launch_v3(
                             consecutive_errors = 0;
                             debug!("Received MQTT v3 publish on topic '{}'", publish.topic);
                             let record = build_v3_record(&cfg, &publish, &descriptors);
-                            if let Some(topic_cfg) = find_topic_config(&cfg, &publish.topic) {
-                                emit_proto_attachment(topic_cfg, &record.entry_name, &mut attached_entries, &pipeline_tx).await;
+                            if let Some(topic_cfg) = find_topic_config(&cfg, &publish.topic)
+                                && attached_entries.insert(record.entry_name.clone())
+                            {
+                                emit_proto_attachment(topic_cfg, &record.entry_name, &pipeline_tx).await;
                             }
                             if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
                                 warn!("Failed to send MQTT v3 record to pipeline: {}", err);
