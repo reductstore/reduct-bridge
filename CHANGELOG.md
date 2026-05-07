@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Deterministic bridge shutdown by tracking component tasks, [PR-22](https://github.com/reductstore/reduct-bridge/pull/22)
+- Pinned third-party GitHub Actions to immutable commit SHAs in CI workflow hardening, [PR-32](https://github.com/reductstore/reduct-bridge/pull/32)
 
 ## 0.1.2 - 2026-03-30
 
