@@ -16,21 +16,45 @@ mod mqtt3;
 mod mqtt5;
 
 use crate::formats::json::{extract_json_path, value_to_label};
-use crate::formats::protobuf::{self, extract_field_by_id};
+use crate::formats::{FormatAttachment, FormatHandler};
 use crate::input::InputLauncher;
 use crate::message::{Attachment, Message};
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
 use log::{info, warn};
-use prost_reflect::DescriptorPool;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::Sender;
+
+struct FallbackFormatHandler;
+
+impl FormatHandler for FallbackFormatHandler {
+    fn decode_payload(
+        &self,
+        _schema_key: &str,
+        _type_name: &str,
+        _payload: &[u8],
+    ) -> Option<Value> {
+        None
+    }
+
+    fn extract_field_value(
+        &self,
+        _payload: &[u8],
+        _field_id: u32,
+        _field_type: &str,
+    ) -> Option<String> {
+        None
+    }
+
+    fn load_attachment(&self, _schema_key: &str) -> Result<FormatAttachment> {
+        bail!("No format attachment available for this topic")
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -66,9 +90,9 @@ pub struct MqttTopicConfig {
     #[serde(default)]
     pub content_type: Option<String>,
     #[serde(default)]
-    pub proto_descriptor: Option<String>,
+    pub descriptor: Option<String>,
     #[serde(default)]
-    pub proto_message: Option<String>,
+    pub message_type: Option<String>,
     #[serde(default)]
     pub labels: Vec<MqttLabelRule>,
 }
@@ -76,21 +100,21 @@ pub struct MqttTopicConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum MqttLabelRule {
-    ProtoField {
-        field_id: u32,
-        field_type: String,
-        label: String,
-    },
-    Field {
-        field: String,
-        label: String,
-    },
     Property {
         property: String,
         label: String,
     },
     Static {
         r#static: HashMap<String, String>,
+    },
+    Field {
+        #[serde(default)]
+        field: Option<String>,
+        #[serde(default)]
+        field_id: Option<u32>,
+        #[serde(default)]
+        field_type: Option<String>,
+        label: String,
     },
 }
 
@@ -155,11 +179,14 @@ impl MqttInstance {
             {
                 bail!("MQTT v3 input does not support property label rules");
             }
-            if topic.proto_descriptor.is_some() != topic.proto_message.is_some() {
+            if topic.descriptor.is_some() != topic.message_type.is_some() {
                 bail!(
-                    "MQTT topic '{}': proto_descriptor and proto_message must both be set or both omitted",
+                    "MQTT topic '{}': descriptor and message_type must both be set or both omitted",
                     topic.name
                 );
+            }
+            for rule in &topic.labels {
+                Self::validate_field_label_rule(&topic.name, rule)?;
             }
         }
 
@@ -172,6 +199,53 @@ impl MqttInstance {
         }
 
         Ok(())
+    }
+
+    fn validate_field_label_rule(topic_name: &str, rule: &MqttLabelRule) -> Result<()> {
+        let MqttLabelRule::Field {
+            field,
+            field_id,
+            field_type,
+            ..
+        } = rule
+        else {
+            return Ok(());
+        };
+
+        if field.as_ref().is_some_and(|f| f.trim().is_empty()) {
+            bail!(
+                "MQTT topic '{}': field label rule 'field' must not be empty",
+                topic_name
+            );
+        }
+        if field_type.as_ref().is_some_and(|t| t.trim().is_empty()) {
+            bail!(
+                "MQTT topic '{}': field label rule 'field_type' must not be empty",
+                topic_name
+            );
+        }
+
+        if field.is_some() {
+            if field_id.is_some() || field_type.is_some() {
+                bail!(
+                    "MQTT topic '{}': field label rule cannot mix 'field' with 'field_id'/'field_type'",
+                    topic_name
+                );
+            }
+            return Ok(());
+        }
+
+        match (field_id, field_type) {
+            (Some(_), Some(_)) => Ok(()),
+            (None, None) => bail!(
+                "MQTT topic '{}': field label rule must define either 'field' or both 'field_id' and 'field_type'",
+                topic_name
+            ),
+            _ => bail!(
+                "MQTT topic '{}': field label rule requires both 'field_id' and 'field_type'",
+                topic_name
+            ),
+        }
     }
 }
 
@@ -297,34 +371,37 @@ pub(super) fn build_payload_labels(
     topic_cfg: &MqttTopicConfig,
     payload: &[u8],
     property_labels: HashMap<String, String>,
-    descriptor_pool: Option<&DescriptorPool>,
+    format: &dyn FormatHandler,
 ) -> HashMap<String, String> {
     let mut labels = build_static_labels(&topic_cfg.labels);
 
-    let json = if let (Some(pool), Some(message_name)) =
-        (descriptor_pool, topic_cfg.proto_message.as_deref())
-    {
-        protobuf::decode_protobuf(pool, message_name, payload)
+    let json = if let (Some(schema_key), Some(type_name)) = (
+        topic_cfg.descriptor.as_deref(),
+        topic_cfg.message_type.as_deref(),
+    ) {
+        format.decode_payload(schema_key, type_name, payload)
     } else {
         serde_json::from_slice::<Value>(payload).ok()
     };
 
     for rule in &topic_cfg.labels {
         match rule {
-            MqttLabelRule::Field { field, label } => {
-                if let Some(json) = &json {
-                    if let Some(value) = extract_json_path(json, field) {
-                        labels.insert(label.clone(), value_to_label(value));
-                    }
-                }
-            }
-            MqttLabelRule::ProtoField {
+            MqttLabelRule::Field {
+                field,
                 field_id,
                 field_type,
                 label,
             } => {
-                if let Some(value) = extract_field_by_id(payload, *field_id, field_type) {
-                    labels.insert(label.clone(), value);
+                if let (Some(json), Some(field)) = (&json, field.as_deref()) {
+                    if let Some(value) = extract_json_path(json, field) {
+                        labels.insert(label.clone(), value_to_label(value));
+                    }
+                } else if let (Some(field_id), Some(field_type)) =
+                    (*field_id, field_type.as_deref())
+                {
+                    if let Some(value) = format.extract_field_value(payload, field_id, field_type) {
+                        labels.insert(label.clone(), value);
+                    }
                 }
             }
             MqttLabelRule::Property { label, .. } => {
@@ -336,50 +413,71 @@ pub(super) fn build_payload_labels(
         }
     }
 
-    if let Some(message_name) = &topic_cfg.proto_message {
-        labels.insert("proto_message".to_string(), message_name.clone());
+    if let Some(message_name) = &topic_cfg.message_type {
+        labels.insert("message_type".to_string(), message_name.clone());
     }
 
     labels
 }
 
-pub(super) type DescriptorMap = Arc<HashMap<String, DescriptorPool>>;
-
-pub(super) async fn emit_proto_attachment(
+pub(super) async fn emit_attachment(
     topic_cfg: &MqttTopicConfig,
     entry_name: &str,
+    format: &dyn FormatHandler,
     pipeline_tx: &Sender<Message>,
 ) {
-    let desc_path = match &topic_cfg.proto_descriptor {
+    let schema_key = match &topic_cfg.descriptor {
         Some(p) => p,
         None => return,
     };
-    let b64 = match protobuf::load_descriptor_base64(desc_path) {
-        Ok(b) => b,
+    let FormatAttachment {
+        key,
+        payload,
+        content_type,
+    } = match format.load_attachment(schema_key) {
+        Ok(a) => a,
         Err(_) => return,
     };
     let attachment = Attachment {
         entry_name: entry_name.to_string(),
-        key: "$proto".to_string(),
-        payload: serde_json::Value::String(b64),
-        content_type: Some("application/octet-stream".to_string()),
+        key,
+        payload: serde_json::Value::String(payload),
+        content_type: Some(content_type),
     };
     if let Err(err) = pipeline_tx.send(Message::Attachment(attachment)).await {
-        warn!("Failed to send proto descriptor attachment: {}", err);
+        warn!("Failed to send format attachment: {}", err);
     }
 }
 
-fn load_descriptors(cfg: &MqttConfig) -> Result<DescriptorMap> {
-    let mut map = HashMap::new();
-    for topic in &cfg.topics {
-        if let Some(path) = &topic.proto_descriptor {
-            if !map.contains_key(path) {
-                let pool = protobuf::load_descriptor(path)?;
-                map.insert(path.clone(), pool);
-            }
-        }
+fn topic_requires_protobuf_handler(topic: &MqttTopicConfig) -> bool {
+    if topic.descriptor.is_some() {
+        return true;
     }
-    Ok(Arc::new(map))
+
+    topic.labels.iter().any(|rule| {
+        matches!(
+            rule,
+            MqttLabelRule::Field {
+                field_id: Some(_),
+                field_type: Some(_),
+                ..
+            }
+        )
+    })
+}
+
+fn load_payload_handler(cfg: &MqttConfig) -> Result<Arc<dyn FormatHandler>> {
+    if !cfg.topics.iter().any(topic_requires_protobuf_handler) {
+        return Ok(Arc::new(FallbackFormatHandler));
+    }
+
+    use crate::formats::protobuf::ProtobufHandler;
+    let paths: Vec<String> = cfg
+        .topics
+        .iter()
+        .filter_map(|t| t.descriptor.clone())
+        .collect();
+    Ok(Arc::new(ProtobufHandler::load(&paths)?))
 }
 
 pub(super) fn ensure_rustls_crypto_provider() {
@@ -398,7 +496,7 @@ impl InputLauncher for MqttInstance {
         let cfg = self.cfg.clone();
         Self::validate_config(&cfg)?;
 
-        let descriptors = load_descriptors(&cfg)?;
+        let format = load_payload_handler(&cfg)?;
 
         info!(
             "Launching MQTT input for broker '{}' with {} topic(s) and client '{}'",
@@ -413,12 +511,12 @@ impl InputLauncher for MqttInstance {
             MqttVersion::V3 => {
                 info!("Using MQTT version 3.1.1");
                 let qos = mqtt3::mqtt_qos(cfg.qos)?;
-                mqtt3::launch_v3(cfg, broker, qos, pipeline_tx, descriptors).await
+                mqtt3::launch_v3(cfg, broker, qos, pipeline_tx, format).await
             }
             MqttVersion::V5 => {
                 info!("Using MQTT version 5.0");
                 let qos = mqtt5::mqtt_v5_qos(cfg.qos)?;
-                mqtt5::launch_v5(cfg, broker, qos, pipeline_tx, descriptors).await
+                mqtt5::launch_v5(cfg, broker, qos, pipeline_tx, format).await
             }
         }
     }
@@ -427,15 +525,15 @@ impl InputLauncher for MqttInstance {
 #[cfg(test)]
 mod tests {
     use super::{
-        BrokerScheme, MqttConfig, MqttInstance, MqttLabelRule, MqttTopicConfig, MqttVersion,
-        build_payload_labels, entry_name, find_topic_config, mqtt_topic_matches, mqtt3, mqtt5,
-        parse_broker, resolve_entry_name,
+        BrokerScheme, FallbackFormatHandler, MqttConfig, MqttInstance, MqttLabelRule,
+        MqttTopicConfig, MqttVersion, build_payload_labels, entry_name, find_topic_config,
+        mqtt_topic_matches, mqtt3, mqtt5, parse_broker, resolve_entry_name,
     };
+    use crate::formats::protobuf::ProtobufHandler;
     use bytes::Bytes;
     use rstest::{fixture, rstest};
     use rumqttc::v5::mqttbytes::v5::{Publish as V5Publish, PublishProperties};
     use std::collections::HashMap;
-    use std::sync::Arc;
 
     #[fixture]
     fn mqtt_cfg() -> MqttConfig {
@@ -447,8 +545,8 @@ mod tests {
                 name: "factory/+/telemetry".to_string(),
                 entry_name: None,
                 content_type: None,
-                proto_descriptor: None,
-                proto_message: None,
+                descriptor: None,
+                message_type: None,
                 labels: Vec::new(),
             }],
             qos: 1,
@@ -570,16 +668,16 @@ mod tests {
                     name: "factory/+/events".to_string(),
                     entry_name: None,
                     content_type: None,
-                    proto_descriptor: None,
-                    proto_message: None,
+                    descriptor: None,
+                    message_type: None,
                     labels: Vec::new(),
                 },
                 MqttTopicConfig {
                     name: "factory/+/telemetry".to_string(),
                     entry_name: Some("telemetry".to_string()),
                     content_type: Some("application/json".to_string()),
-                    proto_descriptor: None,
-                    proto_message: None,
+                    descriptor: None,
+                    message_type: None,
                     labels: Vec::new(),
                 },
             ],
@@ -598,8 +696,8 @@ mod tests {
             name: "factory/+/telemetry".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: None,
-            proto_descriptor: None,
-            proto_message: None,
+            descriptor: None,
+            message_type: None,
             labels: Vec::new(),
         };
 
@@ -678,11 +776,15 @@ mod tests {
     fn mqtt_cfg_with_payload_labels(mut mqtt_cfg: MqttConfig) -> MqttConfig {
         mqtt_cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
-                field: "device_id".to_string(),
+                field: Some("device_id".to_string()),
+                field_id: None,
+                field_type: None,
                 label: "device".to_string(),
             },
             MqttLabelRule::Field {
-                field: "site".to_string(),
+                field: Some("site".to_string()),
+                field_id: None,
+                field_type: None,
                 label: "site".to_string(),
             },
             MqttLabelRule::Static {
@@ -698,7 +800,7 @@ mod tests {
             &mqtt_cfg_with_payload_labels.topics[0],
             br#"{"device_id":"dev-1","site":"lab"}"#,
             HashMap::new(),
-            None,
+            &FallbackFormatHandler,
         );
 
         assert_eq!(labels.get("device"), Some(&"dev-1".to_string()));
@@ -712,11 +814,39 @@ mod tests {
             &mqtt_cfg_with_payload_labels.topics[0],
             b"plain text payload",
             HashMap::new(),
-            None,
+            &FallbackFormatHandler,
         );
 
         assert_eq!(labels.get("device"), None);
         assert_eq!(labels.get("source"), Some(&"mqtt".to_string()));
+    }
+
+    #[rstest]
+    fn builds_payload_labels_from_proto_wire_field_without_descriptor(mut mqtt_cfg: MqttConfig) {
+        mqtt_cfg.topics[0].labels = vec![
+            MqttLabelRule::Field {
+                field: None,
+                field_id: Some(1),
+                field_type: Some("string".to_string()),
+                label: "sensor_id".to_string(),
+            },
+            MqttLabelRule::Static {
+                r#static: HashMap::from([("source".to_string(), "proto-wire".to_string())]),
+            },
+        ];
+
+        // Field 1 (wire type 2) = "dev-1"
+        let payload = b"\x0a\x05dev-1";
+        let labels = build_payload_labels(
+            &mqtt_cfg.topics[0],
+            payload,
+            HashMap::new(),
+            &ProtobufHandler::load(&[]).unwrap(),
+        );
+
+        assert_eq!(labels.get("sensor_id"), Some(&"dev-1".to_string()));
+        assert_eq!(labels.get("source"), Some(&"proto-wire".to_string()));
+        assert_eq!(labels.get("message_type"), None);
     }
 
     #[test]
@@ -726,14 +856,16 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
-            proto_descriptor: None,
-            proto_message: None,
+            descriptor: None,
+            message_type: None,
             labels: Vec::new(),
         }];
         cfg.entry_prefix = "/mqtt".to_string();
         cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
-                field: "device_id".to_string(),
+                field: Some("device_id".to_string()),
+                field_id: None,
+                field_type: None,
                 label: "device".to_string(),
             },
             MqttLabelRule::Static {
@@ -750,8 +882,7 @@ mod tests {
             payload: Bytes::from_static(br#"{"device_id":"dev-1"}"#),
         };
 
-        let descriptors = Arc::new(HashMap::new());
-        let record = mqtt3::build_v3_record(&cfg, &publish, &descriptors);
+        let record = mqtt3::build_v3_record(&cfg, &publish, &FallbackFormatHandler);
 
         assert_eq!(record.entry_name, "mqtt/factory/device-1");
         assert_eq!(
@@ -801,14 +932,16 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: Some("application/json".to_string()),
-            proto_descriptor: None,
-            proto_message: None,
+            descriptor: None,
+            message_type: None,
             labels: Vec::new(),
         }];
         cfg.entry_prefix = "/mqtt".to_string();
         cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
-                field: "device_id".to_string(),
+                field: Some("device_id".to_string()),
+                field_id: None,
+                field_type: None,
                 label: "device".to_string(),
             },
             MqttLabelRule::Static {
@@ -835,8 +968,7 @@ mod tests {
             ..Default::default()
         };
 
-        let descriptors = Arc::new(HashMap::new());
-        let record = mqtt5::build_v5_record(&cfg, &publish, &descriptors);
+        let record = mqtt5::build_v5_record(&cfg, &publish, &FallbackFormatHandler);
 
         assert_eq!(record.entry_name, "mqtt/telemetry");
         assert_eq!(
@@ -860,8 +992,8 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
-            proto_descriptor: None,
-            proto_message: None,
+            descriptor: None,
+            message_type: None,
             labels: Vec::new(),
         }];
 
@@ -872,8 +1004,7 @@ mod tests {
             ..Default::default()
         };
 
-        let descriptors = Arc::new(HashMap::new());
-        let record = mqtt5::build_v5_record(&cfg, &publish, &descriptors);
+        let record = mqtt5::build_v5_record(&cfg, &publish, &FallbackFormatHandler);
 
         assert_eq!(record.content_type, Some("application/json".to_string()));
     }

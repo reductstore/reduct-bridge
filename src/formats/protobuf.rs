@@ -2,17 +2,62 @@ use anyhow::Result;
 use log::warn;
 use prost_reflect::{DescriptorPool, DynamicMessage};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-pub fn load_descriptor(path: &str) -> Result<DescriptorPool> {
+use super::{FormatAttachment, FormatHandler};
+
+pub(crate) struct ProtobufHandler {
+    descriptors: HashMap<String, DescriptorPool>,
+}
+
+impl ProtobufHandler {
+    pub(crate) fn load(paths: &[String]) -> Result<Self> {
+        let mut descriptors = HashMap::new();
+        for path in paths {
+            if !descriptors.contains_key(path) {
+                let pool = load_descriptor(path)?;
+                descriptors.insert(path.clone(), pool);
+            }
+        }
+        Ok(Self { descriptors })
+    }
+}
+
+impl FormatHandler for ProtobufHandler {
+    fn decode_payload(&self, schema_key: &str, type_name: &str, payload: &[u8]) -> Option<Value> {
+        let pool = self.descriptors.get(schema_key)?;
+        decode_protobuf(pool, type_name, payload)
+    }
+
+    fn extract_field_value(
+        &self,
+        payload: &[u8],
+        field_id: u32,
+        field_type: &str,
+    ) -> Option<String> {
+        extract_field_by_id(payload, field_id, field_type)
+    }
+
+    fn load_attachment(&self, schema_key: &str) -> Result<FormatAttachment> {
+        let payload = load_descriptor_base64(schema_key)?;
+        Ok(FormatAttachment {
+            key: "$proto".to_string(),
+            payload,
+            content_type: "application/octet-stream".to_string(),
+        })
+    }
+}
+
+fn load_descriptor(path: &str) -> Result<DescriptorPool> {
     let bytes = fs::read(Path::new(path))
         .map_err(|e| anyhow::anyhow!("failed to read descriptor file '{}': {}", path, e))?;
     DescriptorPool::decode(bytes.as_slice())
         .map_err(|e| anyhow::anyhow!("failed to decode descriptor file '{}': {}", path, e))
 }
 
-pub fn decode_protobuf(pool: &DescriptorPool, message_name: &str, payload: &[u8]) -> Option<Value> {
+fn decode_protobuf(pool: &DescriptorPool, message_name: &str, payload: &[u8]) -> Option<Value> {
     let descriptor = pool.get_message_by_name(message_name)?;
     let message = DynamicMessage::decode(descriptor, payload).ok()?;
     let serializer = prost_reflect::SerializeOptions::new().use_proto_field_name(true);
@@ -22,7 +67,7 @@ pub fn decode_protobuf(pool: &DescriptorPool, message_name: &str, payload: &[u8]
     Some(value)
 }
 
-pub fn extract_field_by_id(payload: &[u8], field_id: u32, field_type: &str) -> Option<String> {
+fn extract_field_by_id(payload: &[u8], field_id: u32, field_type: &str) -> Option<String> {
     let mut result: Option<String> = None;
     let mut offset = 0;
     while offset < payload.len() {
@@ -242,7 +287,7 @@ fn decode_field_value(
     }
 }
 
-pub fn load_descriptor_base64(path: &str) -> Result<String> {
+fn load_descriptor_base64(path: &str) -> Result<String> {
     let bytes = fs::read(Path::new(path))
         .map_err(|e| anyhow::anyhow!("failed to read descriptor file '{}': {}", path, e))?;
     use base64::Engine;

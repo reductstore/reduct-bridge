@@ -27,7 +27,7 @@ prefix = ""
 
 # =============================================================================
 # INPUT: Protobuf WITH descriptor file (labels by field NAME)
-# The proto_descriptor + proto_message let the bridge decode the binary payload
+# The descriptor + message_type let the bridge decode the binary payload
 # into JSON, then extract labels by field name (just like JSON payloads).
 # Also attaches the .desc file as "$proto" so consumers can decode later.
 # =============================================================================
@@ -42,8 +42,8 @@ entry_prefix = ""
 [[inputs.mqtt.main.topics]]
 name = "factory/+/environment"
 content_type = "application/protobuf"
-proto_descriptor = "/app/factory.desc"
-proto_message = "factory.EnvironmentReading"
+descriptor = "/app/factory.desc"
+message_type = "factory.EnvironmentReading"
 
 [[inputs.mqtt.main.topics.labels]]
 field = "device_id"
@@ -56,8 +56,8 @@ label = "line"
 [[inputs.mqtt.main.topics]]
 name = "factory/machines/+/vibration/+"
 content_type = "application/protobuf"
-proto_descriptor = "/app/factory.desc"
-proto_message = "factory.VibrationSpectrum"
+descriptor = "/app/factory.desc"
+message_type = "factory.VibrationSpectrum"
 
 [[inputs.mqtt.main.topics.labels]]
 field = "device_id"
@@ -70,8 +70,8 @@ label = "machine"
 [[inputs.mqtt.main.topics]]
 name = "factory/electrical/+/power"
 content_type = "application/protobuf"
-proto_descriptor = "/app/factory.desc"
-proto_message = "factory.PowerReading"
+descriptor = "/app/factory.desc"
+message_type = "factory.PowerReading"
 
 [[inputs.mqtt.main.topics.labels]]
 field = "device_id"
@@ -83,9 +83,8 @@ label = "panel"
 
 # =============================================================================
 # INPUT: Protobuf WITHOUT descriptor file (labels by field ID)
-# No proto_descriptor means the bridge can't decode field names.
-# Instead, it extracts labels directly from the wire format by field number.
-# The payload stays opaque binary — no "$proto" attachment is stored.
+# No descriptor/message_type means the bridge extracts labels directly
+# from wire bytes using field_id + field_type.
 # =============================================================================
 
 [inputs.mqtt.proto_no_desc]

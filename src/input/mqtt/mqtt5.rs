@@ -1,13 +1,15 @@
 use super::{
-    BrokerScheme, DescriptorMap, MqttConfig, MqttTopicConfig, ParsedBroker, build_payload_labels,
-    current_timestamp_us, emit_proto_attachment, ensure_rustls_crypto_provider, find_topic_config,
+    BrokerScheme, MqttConfig, MqttTopicConfig, ParsedBroker, build_payload_labels,
+    current_timestamp_us, emit_attachment, ensure_rustls_crypto_provider, find_topic_config,
     reconnect_retry_delay, resolve_entry_name,
 };
+use crate::formats::FormatHandler;
 use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
 use log::{debug, error, info, warn};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use tokio::sync::mpsc::{Sender, channel};
 use tokio::time::sleep;
 
@@ -81,16 +83,11 @@ pub(super) fn build_v5_property_labels(
 pub(super) fn build_v5_record(
     cfg: &MqttConfig,
     publish: &rumqttc::v5::mqttbytes::v5::Publish,
-    descriptors: &DescriptorMap,
+    format: &dyn FormatHandler,
 ) -> Record {
     let publish_topic = String::from_utf8_lossy(&publish.topic);
     let topic_cfg = find_topic_config(cfg, &publish_topic)
         .expect("received MQTT v5 publish for unsubscribed topic");
-
-    let descriptor_pool = topic_cfg
-        .proto_descriptor
-        .as_ref()
-        .and_then(|path| descriptors.get(path));
 
     Record {
         timestamp_us: current_timestamp_us(),
@@ -105,7 +102,7 @@ pub(super) fn build_v5_record(
             topic_cfg,
             publish.payload.as_ref(),
             build_v5_property_labels(topic_cfg, publish),
-            descriptor_pool,
+            format,
         ),
     }
 }
@@ -130,7 +127,7 @@ pub(super) async fn launch_v5(
     broker: ParsedBroker,
     qos: rumqttc::v5::mqttbytes::QoS,
     pipeline_tx: Sender<Message>,
-    descriptors: DescriptorMap,
+    format: Arc<dyn FormatHandler>,
 ) -> Result<ComponentRuntime, Error> {
     let options = build_v5_options(&cfg, &broker);
     let (client, mut eventloop) = rumqttc::v5::AsyncClient::new(options, CHANNEL_SIZE);
@@ -171,12 +168,12 @@ pub(super) async fn launch_v5(
                         Ok(rumqttc::v5::Event::Incoming(rumqttc::v5::mqttbytes::v5::Packet::Publish(publish))) => {
                             consecutive_errors = 0;
                             debug!("Received MQTT v5 publish on topic '{}'", String::from_utf8_lossy(&publish.topic));
-                            let record = build_v5_record(&cfg, &publish, &descriptors);
+                            let record = build_v5_record(&cfg, &publish, &*format);
                             let publish_topic = String::from_utf8_lossy(&publish.topic);
                             if let Some(topic_cfg) = find_topic_config(&cfg, &publish_topic)
                                 && attached_entries.insert(record.entry_name.clone())
                             {
-                                emit_proto_attachment(topic_cfg, &record.entry_name, &pipeline_tx).await;
+                                emit_attachment(topic_cfg, &record.entry_name, &*format, &pipeline_tx).await;
                             }
                             if let Err(err) = pipeline_tx.send(Message::Data(record)).await {
                                 warn!("Failed to send MQTT v5 record to pipeline: {}", err);
