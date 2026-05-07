@@ -6,12 +6,13 @@ edition = "2024"
 
 [features]
 default = ["shell"]
-all-inputs = ["shell", "ros1", "ros2", "metrics", "iot"]
+all-inputs = ["shell", "ros1", "ros2", "metrics", "http", "iot"]
 ros1 = ["dep:rosrust"]
 ros2 = ["dep:rclrs", "dep:ros2_message"]
 shell = []
 metrics = ["dep:systemstat"]
 mqtt = ["dep:rumqttc", "dep:rustls", "dep:prost-reflect", "dep:prost", "dep:base64"]
+http = ["dep:reqwest"]
 iot = ["mqtt"]
 ci = []
 
@@ -45,9 +46,13 @@ prost-reflect = { version = "0.14", optional = true, features = ["serde"] }
 prost = { version = "0.13", optional = true }
 base64 = { version = "0.22", optional = true }
 bytesize = { version = "2", features = ["serde"] }
+reqwest = { version = "0.13.3", optional = true, features = [
+  "json",
+  "rustls",
+] }
 
 [dev-dependencies]
-rstest = "0.25.0"
+rstest = "0.26.1"
 futures-util = "0.3.32"
 
 [patch.crates-io]
