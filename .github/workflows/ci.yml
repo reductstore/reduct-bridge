@@ -118,7 +118,7 @@ jobs:
             os: ubuntu-24.04
             ros_distro: ""
             ros_setup_script: ""
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       RUST_BACKTRACE: 1
       RUST_LOG: debug
