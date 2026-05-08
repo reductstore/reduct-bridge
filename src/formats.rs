@@ -35,8 +35,7 @@ use serde_json::Value;
 #[cfg(feature = "mqtt")]
 pub struct FormatAttachment {
     pub key: String,
-    pub payload: String,
-    pub content_type: String,
+    pub payload: Value,
 }
 
 /// Trait for format-specific payload handling.

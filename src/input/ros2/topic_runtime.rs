@@ -42,7 +42,6 @@ impl Ros2TopicRuntime {
                 "schema_name": schema_name,
                 "schema": schema,
             }),
-            content_type: None,
         };
         if let Err(err) = self
             .pipeline_tx

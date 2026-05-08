@@ -29,7 +29,7 @@ prefix = ""
 # INPUT: Protobuf WITH descriptor file (labels by field NAME)
 # The descriptor + message_type let the bridge decode the binary payload
 # into JSON, then extract labels by field name (just like JSON payloads).
-# Also attaches the .desc file as "$proto" so consumers can decode later.
+# Also attaches the .desc file in `$schema` JSON so consumers can decode later.
 # =============================================================================
 
 [inputs.mqtt.main]

@@ -93,15 +93,14 @@ impl TopicRuntime {
             .unwrap_or_else(String::new);
         let attachment_payload = serde_json::json!({
             "encoding": "ros1",
-            "schema": schema,
             "topic": self.topic_name,
             "schema_name": schema_name,
+            "schema": schema,
         });
         let attachment = Attachment {
             entry_name: self.entry_name.clone(),
             key: "$ros".to_string(),
             payload: attachment_payload,
-            content_type: None,
         };
         if let Err(err) = self
             .pipeline_tx

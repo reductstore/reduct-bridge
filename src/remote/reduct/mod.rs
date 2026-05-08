@@ -142,10 +142,7 @@ impl ReductInstance {
 
         let mut attachments = std::collections::HashMap::new();
         attachments.insert(attachment.key, attachment.payload);
-        if let Err(err) = bucket
-            .write_attachments(&entry, attachments, attachment.content_type.as_deref())
-            .await
-        {
+        if let Err(err) = bucket.write_attachments(&entry, attachments).await {
             warn!("Failed to write attachment for entry '{}': {}", entry, err);
         }
     }

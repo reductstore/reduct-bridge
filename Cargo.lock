@@ -2047,11 +2047,10 @@ dependencies = [
 [[package]]
 name = "reduct-rs"
 version = "1.19.1"
-source = "git+https://github.com/reductstore/reduct-rs.git#03434c28872d55acbf00ec7b6b37901763428543"
+source = "git+https://github.com/reductstore/reduct-rs.git#b1740d531b5e3a77d03007741f4e680d96e4d0af"
 dependencies = [
  "async-channel 2.5.0",
  "async-stream",
- "base64",
  "bytes",
  "chrono",
  "futures",

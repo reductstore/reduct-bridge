@@ -23,8 +23,8 @@ Choose one of these modes.
 
 - Set both `descriptor` and `message_type` on the topic.
 - Use `{ field = "...", label = "..." }` to extract labels by field path.
-- The bridge adds `message_type` as a label automatically.
-- The descriptor is emitted as attachment `$proto` (once per entry).
+- The descriptor is emitted as attachment `$schema`.
+- In descriptor mode, attachment payload is JSON and includes `encoding`, `schema`, `topic`, and `schema_name`.
 
 Use this mode when you want self-describing data and easier downstream inspection.
 
@@ -38,7 +38,7 @@ protoc --proto_path=dev/mqtt --include_imports --descriptor_set_out=dev/mqtt/fac
 
 - Omit both `descriptor` and `message_type`.
 - Use `{ field_id = <id>, field_type = "<type>", label = "..." }` to extract labels from raw protobuf wire fields.
-- No `$proto` attachment is emitted.
+- No `$schema` attachment is emitted.
 - No `message_type` label is added.
 
 Use this mode for lightweight setups when you only need a few known fields.

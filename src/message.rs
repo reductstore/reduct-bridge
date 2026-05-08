@@ -31,7 +31,6 @@ pub struct Attachment {
     pub entry_name: String,
     pub key: String,
     pub payload: Value,
-    pub content_type: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -413,15 +413,12 @@ pub(super) fn build_payload_labels(
         }
     }
 
-    if let Some(message_name) = &topic_cfg.message_type {
-        labels.insert("message_type".to_string(), message_name.clone());
-    }
-
     labels
 }
 
 pub(super) async fn emit_attachment(
     topic_cfg: &MqttTopicConfig,
+    publish_topic: &str,
     entry_name: &str,
     format: &dyn FormatHandler,
     pipeline_tx: &Sender<Message>,
@@ -430,19 +427,27 @@ pub(super) async fn emit_attachment(
         Some(p) => p,
         None => return,
     };
-    let FormatAttachment {
-        key,
-        payload,
-        content_type,
-    } = match format.load_attachment(schema_key) {
+    let FormatAttachment { key, payload } = match format.load_attachment(schema_key) {
         Ok(a) => a,
         Err(_) => return,
     };
+
+    let encoding = payload
+        .get("encoding")
+        .cloned()
+        .unwrap_or(serde_json::Value::String("protobuf".to_string()));
+    let schema = payload.get("schema").cloned().unwrap_or(payload);
+    let payload = serde_json::json!({
+        "encoding": encoding,
+        "topic": publish_topic,
+        "schema_name": topic_cfg.message_type.clone(),
+        "schema": schema,
+    });
+
     let attachment = Attachment {
         entry_name: entry_name.to_string(),
         key,
-        payload: serde_json::Value::String(payload),
-        content_type: Some(content_type),
+        payload,
     };
     if let Err(err) = pipeline_tx.send(Message::Attachment(attachment)).await {
         warn!("Failed to send format attachment: {}", err);

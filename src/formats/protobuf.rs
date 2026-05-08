@@ -41,11 +41,13 @@ impl FormatHandler for ProtobufHandler {
     }
 
     fn load_attachment(&self, schema_key: &str) -> Result<FormatAttachment> {
-        let payload = load_descriptor_base64(schema_key)?;
+        let schema = load_descriptor_base64(schema_key)?;
         Ok(FormatAttachment {
-            key: "$proto".to_string(),
-            payload,
-            content_type: "application/octet-stream".to_string(),
+            key: "$schema".to_string(),
+            payload: serde_json::json!({
+                "encoding": "protobuf",
+                "schema": schema,
+            }),
         })
     }
 }
@@ -344,6 +346,16 @@ mod tests {
         let payload = encode_environment_reading();
         let result = decode_protobuf(&pool, "factory.NonExistent", &payload);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn load_attachment_emits_schema_json_payload() {
+        let handler = ProtobufHandler::load(&["dev/mqtt/factory.desc".to_string()]).unwrap();
+        let attachment = handler.load_attachment("dev/mqtt/factory.desc").unwrap();
+
+        assert_eq!(attachment.key, "$schema");
+        assert_eq!(attachment.payload["encoding"], "protobuf");
+        assert!(attachment.payload["schema"].as_str().is_some());
     }
 
     #[test]
