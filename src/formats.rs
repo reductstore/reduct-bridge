@@ -26,26 +26,76 @@ pub mod ros1;
 #[cfg(feature = "ros2")]
 pub mod ros2;
 
-#[cfg(feature = "mqtt")]
 use anyhow::Result;
-#[cfg(feature = "mqtt")]
 use serde_json::Value;
 
+#[derive(Clone, Copy)]
+pub struct DecodeSchema<'a> {
+    pub key: &'a str,
+    pub type_name: &'a str,
+}
+
+#[derive(Clone, Copy)]
+pub struct DecodeInput<'a> {
+    pub payload: &'a [u8],
+    pub schema: Option<DecodeSchema<'a>>,
+}
+
+pub struct DecodeInputBuilder<'a> {
+    payload: &'a [u8],
+    schema: Option<DecodeSchema<'a>>,
+}
+
+impl<'a> DecodeInput<'a> {
+    pub fn builder(payload: &'a [u8]) -> DecodeInputBuilder<'a> {
+        DecodeInputBuilder {
+            payload,
+            schema: None,
+        }
+    }
+}
+
+impl<'a> DecodeInputBuilder<'a> {
+    pub fn with_schema(mut self, key: &'a str, type_name: &'a str) -> Self {
+        self.schema = Some(DecodeSchema { key, type_name });
+        self
+    }
+
+    pub fn build(self) -> DecodeInput<'a> {
+        DecodeInput {
+            payload: self.payload,
+            schema: self.schema,
+        }
+    }
+}
+
 /// Format-specific attachment data (schema, descriptor, etc.)
-#[cfg(feature = "mqtt")]
 pub struct FormatAttachment {
     pub key: String,
     pub payload: Value,
+}
+
+/// Input context for loading a format attachment payload.
+pub struct AttachmentInput<'a> {
+    pub schema_key: &'a str,
+    pub publish_topic: Option<&'a str>,
+    pub schema_name: Option<&'a str>,
 }
 
 /// Trait for format-specific payload handling.
 ///
 /// Implementations handle decoding payloads, extracting fields,
 /// and providing schema attachments.
-#[cfg(feature = "mqtt")]
 pub trait FormatHandler: Send + Sync {
-    /// Decode a raw payload to JSON using the given schema/type information.
-    fn decode_payload(&self, schema_key: &str, type_name: &str, payload: &[u8]) -> Option<Value>;
+    /// Decode a raw payload using optional schema/type information.
+    fn decode_payload(&self, request: DecodeInput<'_>) -> Option<Value>;
+
+    /// Extract a label value from a decoded payload using a dot-separated field path.
+    fn extract_field_path_value(
+        &self,
+        decoded_payload: Option<&Value>,
+        field_path: &str,
+    ) -> Option<String>;
 
     /// Extract a field directly from raw payload bytes (e.g. protobuf wire format).
     fn extract_field_value(
@@ -56,5 +106,5 @@ pub trait FormatHandler: Send + Sync {
     ) -> Option<String>;
 
     /// Load a schema artifact for use as an attachment.
-    fn load_attachment(&self, schema_key: &str) -> Result<FormatAttachment>;
+    fn load_attachment(&self, request: AttachmentInput<'_>) -> Result<FormatAttachment>;
 }

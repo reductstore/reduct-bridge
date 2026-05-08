@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use super::{FormatAttachment, FormatHandler};
+use super::{AttachmentInput, DecodeInput, FormatAttachment, FormatHandler};
+use crate::formats::json::{extract_json_path, value_to_label};
 
 pub(crate) struct ProtobufHandler {
     descriptors: HashMap<String, DescriptorPool>,
@@ -26,9 +27,20 @@ impl ProtobufHandler {
 }
 
 impl FormatHandler for ProtobufHandler {
-    fn decode_payload(&self, schema_key: &str, type_name: &str, payload: &[u8]) -> Option<Value> {
-        let pool = self.descriptors.get(schema_key)?;
-        decode_protobuf(pool, type_name, payload)
+    fn decode_payload(&self, request: DecodeInput<'_>) -> Option<Value> {
+        let schema = request.schema?;
+        let pool = self.descriptors.get(schema.key)?;
+        decode_protobuf(pool, schema.type_name, request.payload)
+    }
+
+    fn extract_field_path_value(
+        &self,
+        decoded_payload: Option<&Value>,
+        field_path: &str,
+    ) -> Option<String> {
+        decoded_payload
+            .and_then(|json| extract_json_path(json, field_path))
+            .map(value_to_label)
     }
 
     fn extract_field_value(
@@ -40,12 +52,14 @@ impl FormatHandler for ProtobufHandler {
         extract_field_by_id(payload, field_id, field_type)
     }
 
-    fn load_attachment(&self, schema_key: &str) -> Result<FormatAttachment> {
-        let schema = load_descriptor_base64(schema_key)?;
+    fn load_attachment(&self, request: AttachmentInput<'_>) -> Result<FormatAttachment> {
+        let schema = load_descriptor_base64(request.schema_key)?;
         Ok(FormatAttachment {
             key: "$schema".to_string(),
             payload: serde_json::json!({
                 "encoding": "protobuf",
+                "topic": request.publish_topic,
+                "schema_name": request.schema_name,
                 "schema": schema,
             }),
         })
@@ -351,10 +365,21 @@ mod tests {
     #[test]
     fn load_attachment_emits_schema_json_payload() {
         let handler = ProtobufHandler::load(&["dev/mqtt/factory.desc".to_string()]).unwrap();
-        let attachment = handler.load_attachment("dev/mqtt/factory.desc").unwrap();
+        let attachment = handler
+            .load_attachment(AttachmentInput {
+                schema_key: "dev/mqtt/factory.desc",
+                publish_topic: Some("factory/line-1/telemetry"),
+                schema_name: Some("factory.EnvironmentReading"),
+            })
+            .unwrap();
 
         assert_eq!(attachment.key, "$schema");
         assert_eq!(attachment.payload["encoding"], "protobuf");
+        assert_eq!(attachment.payload["topic"], "factory/line-1/telemetry");
+        assert_eq!(
+            attachment.payload["schema_name"],
+            "factory.EnvironmentReading"
+        );
         assert!(attachment.payload["schema"].as_str().is_some());
     }
 

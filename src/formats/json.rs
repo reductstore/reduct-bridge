@@ -1,5 +1,44 @@
 use serde_json::Value;
 
+#[cfg(feature = "mqtt")]
+use anyhow::{Result, bail};
+
+#[cfg(feature = "mqtt")]
+use super::{AttachmentInput, DecodeInput, FormatAttachment, FormatHandler};
+
+#[cfg(feature = "mqtt")]
+pub(crate) struct JsonFormatHandler;
+
+#[cfg(feature = "mqtt")]
+impl FormatHandler for JsonFormatHandler {
+    fn decode_payload(&self, request: DecodeInput<'_>) -> Option<Value> {
+        serde_json::from_slice(request.payload).ok()
+    }
+
+    fn extract_field_path_value(
+        &self,
+        decoded_payload: Option<&Value>,
+        field_path: &str,
+    ) -> Option<String> {
+        decoded_payload
+            .and_then(|json| extract_json_path(json, field_path))
+            .map(value_to_label)
+    }
+
+    fn extract_field_value(
+        &self,
+        _payload: &[u8],
+        _field_id: u32,
+        _field_type: &str,
+    ) -> Option<String> {
+        None
+    }
+
+    fn load_attachment(&self, _request: AttachmentInput<'_>) -> Result<FormatAttachment> {
+        bail!("JSON format does not provide schema attachments")
+    }
+}
+
 pub fn extract_json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
     let mut current = value;
     for segment in path.split('.') {

@@ -3,17 +3,15 @@
 The MQTT input subscribes to one or more MQTT topics and forwards messages into a pipeline.
 Both `mqtt://` and `mqtts://` brokers are supported.
 
-MQTT label rules are applied in this order:
+Labels are applied with the following rules:
 
-1. Static labels are applied first.
-2. Payload field labels (`field = "..."`) are applied next and can override static labels.
-  Payload field labels work with:
-  - JSON payloads
-  - protobuf payloads
-3. MQTT v5 property labels are applied last and can override earlier labels.
-  For MQTT v5 property labels:
-  - `property = "content_type"` reads the built-in MQTT v5 `content_type` property
-  - any other `property = "<name>"` reads the MQTT v5 user property named `<name>`
+1. Labels are processed in the order they appear in `labels` in TOML.
+2. For conflicts, later rules override earlier rules for the same label key.
+3. This ordering behavior applies to all rule types: `static`, `field`, and `property`.
+4. Payload field labels (`field = "..."`) work with JSON and protobuf payloads.
+5. MQTT v5 property labels:
+  - `property = "content_type"` reads the built-in MQTT v5 `content_type` property.
+  - `property = "<name>"` reads the MQTT v5 user property named `<name>`.
 
 ## Protobuf support
 
@@ -26,11 +24,11 @@ Choose one of these modes.
   Example command: `protoc --include_imports --descriptor_set_out=schema.desc schema.proto`.
 - `schema_name` is the protobuf message type to decode from the payload, e.g. `my.package.Message`.
 - Use `{ field = "...", label = "..." }` to extract labels by field path.
-- The schema is emitted as attachment `$schema` in JSON with:
-  - `encoding`: payload encoding (`protobuf`)
-  - `topic`: MQTT publish topic that produced the record
-  - `schema_name`: same as the configured `schema_name`
-  - `schema`: same as the configured `schema` file content, base64-encoded
+- The schema is emitted as attachment `$schema` in JSON with fields:
+  `encoding` (payload encoding, `protobuf`),
+  `topic` (MQTT publish topic that produced the record),
+  `schema_name` (same as configured), and
+  `schema` (the configured schema file content, base64-encoded).
 
 Use this mode when you want self-describing data and easier downstream inspection.
 
