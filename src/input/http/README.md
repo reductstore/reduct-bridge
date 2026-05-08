@@ -17,9 +17,6 @@ url = "https://example.com/api/metrics"
 # Must be > 0.
 repeat_interval = 10
 
-# Optional: request method (default = "GET").
-method = "GET"
-
 # Required: target entry name in remote bucket.
 entry_name = "http/metrics"
 
@@ -55,7 +52,6 @@ labels = [
 [inputs.http.status_api]
 url = "https://example.com/api/status"
 repeat_interval = 30
-method = "GET"
 entry_name = "http/status"
 
 [inputs.http.status_api.basic_auth]
@@ -71,6 +67,7 @@ labels = [
 ## Runtime Notes
 
 - Each successful poll produces one record.
+- Requests use the GET method.
 - Non-JSON responses are stored as raw response bytes.
 - JSON field labels are applied only when the response body can be parsed as JSON.
 - Failed requests and non-success HTTP statuses skip that polling cycle.
