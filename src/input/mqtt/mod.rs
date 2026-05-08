@@ -90,9 +90,9 @@ pub struct MqttTopicConfig {
     #[serde(default)]
     pub content_type: Option<String>,
     #[serde(default)]
-    pub descriptor: Option<String>,
+    pub schema: Option<String>,
     #[serde(default)]
-    pub message_type: Option<String>,
+    pub schema_name: Option<String>,
     #[serde(default)]
     pub labels: Vec<MqttLabelRule>,
 }
@@ -179,9 +179,9 @@ impl MqttInstance {
             {
                 bail!("MQTT v3 input does not support property label rules");
             }
-            if topic.descriptor.is_some() != topic.message_type.is_some() {
+            if topic.schema.is_some() != topic.schema_name.is_some() {
                 bail!(
-                    "MQTT topic '{}': descriptor and message_type must both be set or both omitted",
+                    "MQTT topic '{}': schema and schema_name must both be set or both omitted",
                     topic.name
                 );
             }
@@ -376,8 +376,8 @@ pub(super) fn build_payload_labels(
     let mut labels = build_static_labels(&topic_cfg.labels);
 
     let json = if let (Some(schema_key), Some(type_name)) = (
-        topic_cfg.descriptor.as_deref(),
-        topic_cfg.message_type.as_deref(),
+        topic_cfg.schema.as_deref(),
+        topic_cfg.schema_name.as_deref(),
     ) {
         format.decode_payload(schema_key, type_name, payload)
     } else {
@@ -423,7 +423,7 @@ pub(super) async fn emit_attachment(
     format: &dyn FormatHandler,
     pipeline_tx: &Sender<Message>,
 ) {
-    let schema_key = match &topic_cfg.descriptor {
+    let schema_key = match &topic_cfg.schema {
         Some(p) => p,
         None => return,
     };
@@ -440,7 +440,7 @@ pub(super) async fn emit_attachment(
     let payload = serde_json::json!({
         "encoding": encoding,
         "topic": publish_topic,
-        "schema_name": topic_cfg.message_type.clone(),
+        "schema_name": topic_cfg.schema_name.clone(),
         "schema": schema,
     });
 
@@ -455,7 +455,7 @@ pub(super) async fn emit_attachment(
 }
 
 fn topic_requires_protobuf_handler(topic: &MqttTopicConfig) -> bool {
-    if topic.descriptor.is_some() {
+    if topic.schema.is_some() {
         return true;
     }
 
@@ -477,11 +477,7 @@ fn load_payload_handler(cfg: &MqttConfig) -> Result<Arc<dyn FormatHandler>> {
     }
 
     use crate::formats::protobuf::ProtobufHandler;
-    let paths: Vec<String> = cfg
-        .topics
-        .iter()
-        .filter_map(|t| t.descriptor.clone())
-        .collect();
+    let paths: Vec<String> = cfg.topics.iter().filter_map(|t| t.schema.clone()).collect();
     Ok(Arc::new(ProtobufHandler::load(&paths)?))
 }
 
@@ -550,8 +546,8 @@ mod tests {
                 name: "factory/+/telemetry".to_string(),
                 entry_name: None,
                 content_type: None,
-                descriptor: None,
-                message_type: None,
+                schema: None,
+                schema_name: None,
                 labels: Vec::new(),
             }],
             qos: 1,
@@ -673,16 +669,16 @@ mod tests {
                     name: "factory/+/events".to_string(),
                     entry_name: None,
                     content_type: None,
-                    descriptor: None,
-                    message_type: None,
+                    schema: None,
+                    schema_name: None,
                     labels: Vec::new(),
                 },
                 MqttTopicConfig {
                     name: "factory/+/telemetry".to_string(),
                     entry_name: Some("telemetry".to_string()),
                     content_type: Some("application/json".to_string()),
-                    descriptor: None,
-                    message_type: None,
+                    schema: None,
+                    schema_name: None,
                     labels: Vec::new(),
                 },
             ],
@@ -701,8 +697,8 @@ mod tests {
             name: "factory/+/telemetry".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: None,
-            descriptor: None,
-            message_type: None,
+            schema: None,
+            schema_name: None,
             labels: Vec::new(),
         };
 
@@ -851,7 +847,7 @@ mod tests {
 
         assert_eq!(labels.get("sensor_id"), Some(&"dev-1".to_string()));
         assert_eq!(labels.get("source"), Some(&"proto-wire".to_string()));
-        assert_eq!(labels.get("message_type"), None);
+        assert_eq!(labels.get("schema_name"), None);
     }
 
     #[test]
@@ -861,8 +857,8 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
-            descriptor: None,
-            message_type: None,
+            schema: None,
+            schema_name: None,
             labels: Vec::new(),
         }];
         cfg.entry_prefix = "/mqtt".to_string();
@@ -937,8 +933,8 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: Some("application/json".to_string()),
-            descriptor: None,
-            message_type: None,
+            schema: None,
+            schema_name: None,
             labels: Vec::new(),
         }];
         cfg.entry_prefix = "/mqtt".to_string();
@@ -997,8 +993,8 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
-            descriptor: None,
-            message_type: None,
+            schema: None,
+            schema_name: None,
             labels: Vec::new(),
         }];
 
