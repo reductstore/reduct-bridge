@@ -17,6 +17,11 @@ batch_max_records = 80
 batch_max_size_bytes = 8388608
 # Optional: periodic flush interval in milliseconds (default: 1000, must be > 0).
 batch_max_interval_ms = 1000
+# Optional: create the bucket on startup if it does not exist.
+# Omit this table to require the bucket to exist before starting reduct-bridge.
+# [remotes.reduct.create_bucket]
+# quota_type = "FIFO" # NONE, FIFO, or HARD
+# quota_size = 1073741824 # bytes
 
 
 # ROS1 input configuration.

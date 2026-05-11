@@ -10,6 +10,11 @@ token_api = "***"
 bucket = "my-bucket"
 # Required key prefix inside the bucket.
 prefix = ""
+# Optional: create the bucket on startup if it does not exist.
+# Omit this table to require the bucket to exist before starting reduct-bridge.
+# [remotes.reduct.create_bucket]
+# quota_type = "FIFO" # NONE, FIFO, or HARD
+# quota_size = 1073741824 # bytes
 
 
 # MQTT v5 input configuration.

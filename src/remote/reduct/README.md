@@ -33,12 +33,23 @@ batch_max_size_bytes = 8388608
 
 # Periodic flush interval in milliseconds (default: 1000, must be > 0).
 batch_max_interval_ms = 1000
+
+# Optional: create the bucket on startup if it does not exist.
+# Omit this table to require the bucket to exist before starting reduct-bridge.
+[remotes.reduct.create_bucket]
+# Required when create_bucket is configured: NONE, FIFO, or HARD.
+quota_type = "FIFO"
+
+# Required when create_bucket is configured: quota size in bytes.
+quota_size = 1073741824
 ```
 
 ## Runtime Notes
 
 - Records are buffered and flushed by count, size, or interval.
 - Invalid batching values (`0`) are not allowed.
+- Buckets are not created automatically unless `[remotes.reduct.create_bucket]` is configured.
+- Automatic bucket creation only applies when the configured bucket is missing; existing bucket settings are not changed.
 
 ## Changes
 

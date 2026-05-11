@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional ReductStore bucket creation with quota settings via `[remotes.reduct.create_bucket]`.
+
 ## 0.2.0 - 2026-05-11
 
 ### Added
