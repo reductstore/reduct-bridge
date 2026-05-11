@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use super::{AttachmentContext, DecodeSchema, FormatAttachment, FormatHandler};
+use super::{AttachmentContext, DecodeFormat, FormatAttachment, FormatHandler};
 use crate::formats::json::{extract_json_path, value_to_label};
 
 pub(crate) struct ProtobufHandler {
@@ -27,8 +27,10 @@ impl ProtobufHandler {
 }
 
 impl FormatHandler for ProtobufHandler {
-    fn decode_payload(&self, payload: &[u8], schema: Option<DecodeSchema<'_>>) -> Option<Value> {
-        let schema = schema?;
+    fn decode_payload(&self, payload: &[u8], format: DecodeFormat<'_>) -> Option<Value> {
+        let DecodeFormat::Protobuf(schema) = format else {
+            return None;
+        };
         let pool = self.descriptors.get(schema.key)?;
         decode_protobuf(pool, schema.type_name, payload)
     }

@@ -15,7 +15,9 @@
 mod mqtt3;
 mod mqtt5;
 
-use crate::formats::{AttachmentContext, DecodeSchema, FormatAttachment, FormatHandler};
+use crate::formats::{
+    AttachmentContext, DecodeFormat, DecodeSchema, FormatAttachment, FormatHandler,
+};
 use crate::input::InputLauncher;
 use crate::message::{Attachment, Message};
 use crate::runtime::ComponentRuntime;
@@ -44,12 +46,15 @@ impl MqttPayloadHandler {
 }
 
 impl FormatHandler for MqttPayloadHandler {
-    fn decode_payload(&self, payload: &[u8], schema: Option<DecodeSchema<'_>>) -> Option<Value> {
-        if schema.is_some() {
-            return self.protobuf.as_ref()?.decode_payload(payload, schema);
+    fn decode_payload(&self, payload: &[u8], format: DecodeFormat<'_>) -> Option<Value> {
+        match format {
+            DecodeFormat::Json => self.json.decode_payload(payload, DecodeFormat::Json),
+            DecodeFormat::Protobuf(schema) => self
+                .protobuf
+                .as_ref()?
+                .decode_payload(payload, DecodeFormat::Protobuf(schema)),
+            DecodeFormat::Other(_) => None,
         }
-
-        self.json.decode_payload(payload, schema)
     }
 
     fn extract_field_path_value(
@@ -522,7 +527,7 @@ fn decode_payload_for_labels(
     format: &dyn FormatHandler,
 ) -> Option<Value> {
     match payload_format_for_topic(topic_cfg) {
-        PayloadFormat::Json => format.decode_payload(payload, None),
+        PayloadFormat::Json => format.decode_payload(payload, DecodeFormat::Json),
         PayloadFormat::Protobuf => {
             if let (Some(schema_key), Some(type_name)) = (
                 topic_cfg.schema.as_deref(),
@@ -530,7 +535,7 @@ fn decode_payload_for_labels(
             ) {
                 return format.decode_payload(
                     payload,
-                    Some(DecodeSchema {
+                    DecodeFormat::Protobuf(DecodeSchema {
                         key: schema_key,
                         type_name,
                     }),

@@ -35,6 +35,14 @@ pub struct DecodeSchema<'a> {
     pub type_name: &'a str,
 }
 
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub enum DecodeFormat<'a> {
+    Json,
+    Protobuf(DecodeSchema<'a>),
+    Other(&'a str),
+}
+
 /// Format-specific attachment data (schema, descriptor, etc.)
 pub struct FormatAttachment {
     pub key: String,
@@ -53,8 +61,8 @@ pub struct AttachmentContext<'a> {
 /// Implementations handle decoding payloads, extracting fields,
 /// and providing schema attachments.
 pub trait FormatHandler: Send + Sync {
-    /// Decode a raw payload using optional schema/type information.
-    fn decode_payload(&self, payload: &[u8], schema: Option<DecodeSchema<'_>>) -> Option<Value>;
+    /// Decode a raw payload using explicit format-specific decode instructions.
+    fn decode_payload(&self, payload: &[u8], format: DecodeFormat<'_>) -> Option<Value>;
 
     /// Extract a label value from a decoded payload using a dot-separated field path.
     fn extract_field_path_value(
