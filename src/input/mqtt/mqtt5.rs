@@ -119,7 +119,7 @@ pub(super) async fn launch_v5(
     broker: ParsedBroker,
     qos: rumqttc::v5::mqttbytes::QoS,
     pipeline_tx: Sender<Message>,
-    format: Arc<dyn FormatHandler>,
+    format: Arc<super::MqttPayloadHandler>,
 ) -> Result<ComponentRuntime, Error> {
     let options = build_v5_options(&cfg, &broker);
     let (client, mut eventloop) = rumqttc::v5::AsyncClient::new(options, CHANNEL_SIZE);

@@ -74,7 +74,7 @@ pub(super) async fn launch_v3(
     broker: ParsedBroker,
     qos: rumqttc::QoS,
     pipeline_tx: Sender<Message>,
-    format: Arc<dyn FormatHandler>,
+    format: Arc<super::MqttPayloadHandler>,
 ) -> Result<ComponentRuntime, Error> {
     let options = build_v3_options(&cfg, &broker);
     let (client, mut eventloop) = rumqttc::AsyncClient::new(options, CHANNEL_SIZE);

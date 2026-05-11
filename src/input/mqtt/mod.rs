@@ -645,43 +645,16 @@ pub(super) async fn emit_attachment(
     true
 }
 
-fn topic_requires_protobuf_handler(topic: &MqttTopicConfig) -> bool {
-    if payload_format_for_topic(topic) != PayloadFormat::Protobuf {
-        return false;
-    }
-
-    if topic.schema.is_some() {
-        return true;
-    }
-
-    topic.labels.iter().any(|rule| {
-        matches!(
-            rule,
-            MqttLabelRule::Field {
-                field_id: Some(_),
-                field_type: Some(_),
-                ..
-            }
-        )
-    })
-}
-
-fn load_payload_handler(cfg: &MqttConfig) -> Result<Arc<dyn FormatHandler>> {
+fn load_payload_handler(cfg: &MqttConfig) -> Result<Arc<MqttPayloadHandler>> {
     use crate::formats::protobuf::ProtobufHandler;
 
-    for topic in &cfg.topics {
-        if payload_format_for_topic(topic) == PayloadFormat::None && topic_uses_decode_labels(topic)
-        {
-            bail!(
-                "MQTT topic '{}': field labels require JSON or protobuf content_type",
-                topic.name
-            );
-        }
-    }
+    let has_format = |fmt| {
+        cfg.topics
+            .iter()
+            .any(|t| payload_format_for_topic(t) == fmt)
+    };
 
-    let needs_protobuf = cfg.topics.iter().any(topic_requires_protobuf_handler);
-
-    let protobuf = if needs_protobuf {
+    let protobuf = if has_format(PayloadFormat::Protobuf) {
         let paths: Vec<String> = cfg.topics.iter().filter_map(|t| t.schema.clone()).collect();
         Some(ProtobufHandler::load(&paths)?)
     } else {
