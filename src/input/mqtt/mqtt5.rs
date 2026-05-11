@@ -1,5 +1,5 @@
 use super::{
-    BrokerScheme, MqttConfig, MqttTopicConfig, ParsedBroker, build_payload_labels,
+    BrokerScheme, MqttConfig, ParsedBroker, PropertyLabelResolver, build_record_labels,
     current_timestamp_us, emit_attachment, ensure_rustls_crypto_provider, find_topic_config,
     reconnect_retry_delay, resolve_entry_name,
 };
@@ -8,7 +8,7 @@ use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
 use log::{debug, error, info, warn};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Sender, channel};
 use tokio::time::sleep;
@@ -44,40 +44,31 @@ pub(super) fn build_v5_options(
     options
 }
 
-pub(super) fn build_v5_property_labels(
-    topic_cfg: &MqttTopicConfig,
-    publish: &rumqttc::v5::mqttbytes::v5::Publish,
-) -> HashMap<String, String> {
-    let mut labels = HashMap::new();
-    let Some(properties) = &publish.properties else {
-        return labels;
-    };
+pub(super) struct V5PropertyResolver<'a> {
+    properties: Option<&'a rumqttc::v5::mqttbytes::v5::PublishProperties>,
+}
 
-    for rule in &topic_cfg.labels {
-        let (property_name, label_name) = match rule {
-            super::MqttLabelRule::Property { property, label } => (property.as_str(), label),
-            _ => continue,
-        };
-
-        match property_name {
-            "content_type" => {
-                if let Some(value) = &properties.content_type {
-                    labels.insert(label_name.clone(), value.clone());
-                }
-            }
-            user_key => {
-                if let Some((_, value)) = properties
-                    .user_properties
-                    .iter()
-                    .find(|(key, _)| key == user_key)
-                {
-                    labels.insert(label_name.clone(), value.clone());
-                }
-            }
+impl<'a> V5PropertyResolver<'a> {
+    pub(super) fn new(publish: &'a rumqttc::v5::mqttbytes::v5::Publish) -> Self {
+        Self {
+            properties: publish.properties.as_ref(),
         }
     }
+}
 
-    labels
+impl PropertyLabelResolver for V5PropertyResolver<'_> {
+    fn resolve_property(&self, property_name: &str) -> Option<String> {
+        let properties = self.properties?;
+
+        match property_name {
+            "content_type" => properties.content_type.clone(),
+            user_key => properties
+                .user_properties
+                .iter()
+                .find(|(key, _)| key == user_key)
+                .map(|(_, value)| value.clone()),
+        }
+    }
 }
 
 pub(super) fn build_v5_record(
@@ -88,6 +79,7 @@ pub(super) fn build_v5_record(
     let publish_topic = String::from_utf8_lossy(&publish.topic);
     let topic_cfg = find_topic_config(cfg, &publish_topic)
         .expect("received MQTT v5 publish for unsubscribed topic");
+    let property_resolver = V5PropertyResolver::new(publish);
 
     Record {
         timestamp_us: current_timestamp_us(),
@@ -98,10 +90,10 @@ pub(super) fn build_v5_record(
             .as_ref()
             .and_then(|props| props.content_type.clone())
             .or_else(|| topic_cfg.content_type.clone()),
-        labels: build_payload_labels(
+        labels: build_record_labels(
             topic_cfg,
             publish.payload.as_ref(),
-            build_v5_property_labels(topic_cfg, publish),
+            Some(&property_resolver),
             format,
         ),
     }

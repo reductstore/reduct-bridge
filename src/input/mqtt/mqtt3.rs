@@ -1,5 +1,5 @@
 use super::{
-    BrokerScheme, MqttConfig, ParsedBroker, build_payload_labels, current_timestamp_us,
+    BrokerScheme, MqttConfig, ParsedBroker, build_record_labels, current_timestamp_us,
     emit_attachment, ensure_rustls_crypto_provider, find_topic_config, reconnect_retry_delay,
     resolve_entry_name,
 };
@@ -54,12 +54,7 @@ pub(super) fn build_v3_record(
         entry_name: resolve_entry_name(&cfg.entry_prefix, topic_cfg, &publish.topic),
         content: publish.payload.clone(),
         content_type: topic_cfg.content_type.clone(),
-        labels: build_payload_labels(
-            topic_cfg,
-            publish.payload.as_ref(),
-            std::collections::HashMap::new(),
-            format,
-        ),
+        labels: build_record_labels(topic_cfg, publish.payload.as_ref(), None, format),
     }
 }
 

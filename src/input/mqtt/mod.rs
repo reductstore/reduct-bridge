@@ -488,10 +488,10 @@ fn parse_broker(broker: &str) -> Result<ParsedBroker> {
     Ok(ParsedBroker { scheme, host, port })
 }
 
-pub(super) fn build_payload_labels(
+pub(super) fn build_record_labels(
     topic_cfg: &MqttTopicConfig,
     payload: &[u8],
-    property_labels: HashMap<String, String>,
+    property_resolver: Option<&dyn PropertyLabelResolver>,
     format: &dyn FormatHandler,
 ) -> HashMap<String, String> {
     let mut labels = HashMap::new();
@@ -504,12 +504,16 @@ pub(super) fn build_payload_labels(
             rule,
             decoded_payload.as_ref(),
             payload,
-            &property_labels,
+            property_resolver,
             format,
         );
     }
 
     labels
+}
+
+pub(super) trait PropertyLabelResolver {
+    fn resolve_property(&self, property_name: &str) -> Option<String>;
 }
 
 fn decode_payload_for_labels(
@@ -541,7 +545,7 @@ fn apply_label_rule(
     rule: &MqttLabelRule,
     decoded_payload: Option<&Value>,
     raw_payload: &[u8],
-    property_labels: &HashMap<String, String>,
+    property_resolver: Option<&dyn PropertyLabelResolver>,
     format: &dyn FormatHandler,
 ) {
     match rule {
@@ -551,19 +555,22 @@ fn apply_label_rule(
             field_type,
             label,
         } => {
-            if let (Some(json), Some(field_path)) = (decoded_payload, field.as_deref()) {
-                if let Some(value) = format.extract_field_path_value(Some(json), field_path) {
-                    labels.insert(label.clone(), value);
-                }
-            } else if let (Some(field_id), Some(field_type)) = (*field_id, field_type.as_deref()) {
-                if let Some(value) = format.extract_field_value(raw_payload, field_id, field_type) {
-                    labels.insert(label.clone(), value);
-                }
+            if let Some(value) = resolve_field_label(
+                decoded_payload,
+                raw_payload,
+                field.as_deref(),
+                *field_id,
+                field_type.as_deref(),
+                format,
+            ) {
+                labels.insert(label.clone(), value);
             }
         }
-        MqttLabelRule::Property { label, .. } => {
-            if let Some(value) = property_labels.get(label) {
-                labels.insert(label.clone(), value.clone());
+        MqttLabelRule::Property { property, label } => {
+            if let Some(value) =
+                property_resolver.and_then(|resolver| resolver.resolve_property(property))
+            {
+                labels.insert(label.clone(), value);
             }
         }
         MqttLabelRule::Static { r#static } => {
@@ -572,6 +579,25 @@ fn apply_label_rule(
             }
         }
     }
+}
+
+fn resolve_field_label(
+    decoded_payload: Option<&Value>,
+    raw_payload: &[u8],
+    field_path: Option<&str>,
+    field_id: Option<u32>,
+    field_type: Option<&str>,
+    format: &dyn FormatHandler,
+) -> Option<String> {
+    if let (Some(json), Some(path)) = (decoded_payload, field_path) {
+        return format.extract_field_path_value(Some(json), path);
+    }
+
+    if let (Some(id), Some(value_type)) = (field_id, field_type) {
+        return format.extract_field_value(raw_payload, id, value_type);
+    }
+
+    None
 }
 
 pub(super) async fn emit_attachment(
@@ -705,8 +731,8 @@ impl InputLauncher for MqttInstance {
 mod tests {
     use super::{
         BrokerScheme, MqttConfig, MqttInstance, MqttLabelRule, MqttPayloadHandler, MqttTopicConfig,
-        MqttVersion, build_payload_labels, entry_name, find_topic_config, mqtt_topic_matches,
-        mqtt3, mqtt5, parse_broker, resolve_entry_name,
+        MqttVersion, build_record_labels, entry_name, find_topic_config, mqtt_topic_matches, mqtt3,
+        mqtt5, parse_broker, resolve_entry_name,
     };
     use crate::formats::protobuf::ProtobufHandler;
     use bytes::Bytes;
@@ -975,11 +1001,11 @@ mod tests {
     }
 
     #[rstest]
-    fn builds_payload_labels_from_static_and_json_rules(mqtt_cfg_with_payload_labels: MqttConfig) {
-        let labels = build_payload_labels(
+    fn builds_record_labels_from_static_and_json_rules(mqtt_cfg_with_payload_labels: MqttConfig) {
+        let labels = build_record_labels(
             &mqtt_cfg_with_payload_labels.topics[0],
             br#"{"device_id":"dev-1","site":"lab"}"#,
-            HashMap::new(),
+            None,
             &MqttPayloadHandler::new(None),
         );
 
@@ -1003,10 +1029,10 @@ mod tests {
             },
         ];
 
-        let labels = build_payload_labels(
+        let labels = build_record_labels(
             &mqtt_cfg.topics[0],
             br#"{"device_id":"dev-1"}"#,
-            HashMap::new(),
+            None,
             &MqttPayloadHandler::new(None),
         );
 
@@ -1015,10 +1041,10 @@ mod tests {
 
     #[rstest]
     fn skips_json_labels_when_payload_is_not_json(mqtt_cfg_with_payload_labels: MqttConfig) {
-        let labels = build_payload_labels(
+        let labels = build_record_labels(
             &mqtt_cfg_with_payload_labels.topics[0],
             b"plain text payload",
-            HashMap::new(),
+            None,
             &MqttPayloadHandler::new(None),
         );
 
@@ -1027,7 +1053,7 @@ mod tests {
     }
 
     #[rstest]
-    fn builds_payload_labels_from_proto_wire_field_without_descriptor(mut mqtt_cfg: MqttConfig) {
+    fn builds_record_labels_from_proto_wire_field_without_descriptor(mut mqtt_cfg: MqttConfig) {
         mqtt_cfg.topics[0].content_type = Some("application/protobuf".to_string());
         mqtt_cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
@@ -1043,10 +1069,10 @@ mod tests {
 
         // Field 1 (wire type 2) = "dev-1"
         let payload = b"\x0a\x05dev-1";
-        let labels = build_payload_labels(
+        let labels = build_record_labels(
             &mqtt_cfg.topics[0],
             payload,
-            HashMap::new(),
+            None,
             &MqttPayloadHandler::new(Some(ProtobufHandler::load(&[]).unwrap())),
         );
 
@@ -1101,7 +1127,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_v5_property_labels_from_known_properties() {
+    fn resolves_v5_property_labels_with_property_resolver() {
         let mut cfg = mqtt_cfg();
         cfg.topics[0].labels = vec![
             MqttLabelRule::Property {
@@ -1125,10 +1151,108 @@ mod tests {
             ..Default::default()
         };
 
-        let labels = mqtt5::build_v5_property_labels(&cfg.topics[0], &publish);
+        let resolver = mqtt5::V5PropertyResolver::new(&publish);
+        let labels = build_record_labels(
+            &cfg.topics[0],
+            publish.payload.as_ref(),
+            Some(&resolver),
+            &MqttPayloadHandler::new(None),
+        );
 
         assert_eq!(labels.get("mime"), Some(&"application/json".to_string()));
         assert_eq!(labels.get("tenant"), Some(&"acme".to_string()));
+    }
+
+    #[test]
+    fn resolver_returns_no_labels_when_v5_publish_has_no_properties() {
+        let mut cfg = mqtt_cfg();
+        cfg.topics[0].labels = vec![
+            MqttLabelRule::Property {
+                property: "content_type".to_string(),
+                label: "mime".to_string(),
+            },
+            MqttLabelRule::Property {
+                property: "tenant".to_string(),
+                label: "tenant".to_string(),
+            },
+        ];
+
+        let publish = V5Publish {
+            topic: Bytes::from_static(b"test/topic"),
+            payload: Bytes::from_static(b"{}"),
+            properties: None,
+            ..Default::default()
+        };
+
+        let resolver = mqtt5::V5PropertyResolver::new(&publish);
+        let labels = build_record_labels(
+            &cfg.topics[0],
+            publish.payload.as_ref(),
+            Some(&resolver),
+            &MqttPayloadHandler::new(None),
+        );
+
+        assert_eq!(labels.get("mime"), None);
+        assert_eq!(labels.get("tenant"), None);
+    }
+
+    #[test]
+    fn resolver_ignores_unknown_v5_property_keys() {
+        let mut cfg = mqtt_cfg();
+        cfg.topics[0].labels = vec![MqttLabelRule::Property {
+            property: "device_group".to_string(),
+            label: "group".to_string(),
+        }];
+
+        let publish = V5Publish {
+            topic: Bytes::from_static(b"test/topic"),
+            payload: Bytes::from_static(b"{}"),
+            properties: Some(PublishProperties {
+                user_properties: vec![("tenant".to_string(), "acme".to_string())],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let resolver = mqtt5::V5PropertyResolver::new(&publish);
+        let labels = build_record_labels(
+            &cfg.topics[0],
+            publish.payload.as_ref(),
+            Some(&resolver),
+            &MqttPayloadHandler::new(None),
+        );
+
+        assert_eq!(labels.get("group"), None);
+    }
+
+    #[test]
+    fn resolver_maps_v5_user_property_to_different_label_name() {
+        let mut cfg = mqtt_cfg();
+        cfg.topics[0].labels = vec![MqttLabelRule::Property {
+            property: "tenant".to_string(),
+            label: "org".to_string(),
+        }];
+
+        let publish = V5Publish {
+            topic: Bytes::from_static(b"test/topic"),
+            payload: Bytes::from_static(b"{}"),
+            properties: Some(PublishProperties {
+                user_properties: vec![("tenant".to_string(), "acme".to_string())],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let resolver = mqtt5::V5PropertyResolver::new(&publish);
+        let labels = build_record_labels(
+            &cfg.topics[0],
+            publish.payload.as_ref(),
+            Some(&resolver),
+            &MqttPayloadHandler::new(None),
+        );
+
+        assert_eq!(labels.get("org"), Some(&"acme".to_string()));
+        assert_eq!(labels.get("tenant"), None);
     }
 
     #[test]
