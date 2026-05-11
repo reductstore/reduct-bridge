@@ -83,14 +83,12 @@ impl FormatHandler for ProtobufHandler {
     }
 
     fn build_attachment(&self, context: AttachmentContext<'_>) -> Result<FormatAttachment> {
-        let schema = self
-            .schema_base64(context.schema_key)
-            .with_context(|| {
-                format!(
-                    "schema '{}' was not loaded in protobuf handler",
-                    context.schema_key
-                )
-            })?;
+        let schema = self.schema_base64(context.schema_key).with_context(|| {
+            format!(
+                "schema '{}' was not loaded in protobuf handler",
+                context.schema_key
+            )
+        })?;
         Ok(FormatAttachment {
             key: "$schema".to_string(),
             payload: serde_json::json!({
@@ -113,6 +111,9 @@ fn decode_protobuf(pool: &DescriptorPool, message_name: &str, payload: &[u8]) ->
     Some(value)
 }
 
+/// Wire-level top-level scalar field extractor (not a full decoder).
+/// Last occurrence wins. No nested messages, packed repeated, maps, or extensions.
+/// https://protobuf.dev/programming-guides/encoding/
 fn extract_field_by_id(payload: &[u8], field_id: u32, field_type: &str) -> Option<String> {
     let mut result: Option<String> = None;
     let mut offset = 0;
@@ -121,6 +122,10 @@ fn extract_field_by_id(payload: &[u8], field_id: u32, field_type: &str) -> Optio
         offset = new_offset;
         let wire_type = (tag & 0x07) as u8;
         let number = (tag >> 3) as u32;
+
+        if number == 0 || wire_type > 5 {
+            return None;
+        }
 
         if number == field_id {
             result = decode_field_value(payload, offset, wire_type, field_type);
@@ -131,6 +136,7 @@ fn extract_field_by_id(payload: &[u8], field_id: u32, field_type: &str) -> Optio
     result
 }
 
+/// Base-128 varint decoder, bounded to 64 bits
 fn decode_varint(buf: &[u8], mut offset: usize) -> Option<(u64, usize)> {
     let mut result: u64 = 0;
     let mut shift = 0u32;
@@ -151,60 +157,37 @@ fn decode_varint(buf: &[u8], mut offset: usize) -> Option<(u64, usize)> {
     }
 }
 
+/// Skip one wire field. Returns the offset of the next field or `None` on malformed input.
 fn skip_field(buf: &[u8], offset: usize, wire_type: u8) -> Option<usize> {
     match wire_type {
-        0 => {
-            // VARINT
-            let (_, new_offset) = decode_varint(buf, offset)?;
-            Some(new_offset)
-        }
-        1 => {
-            // I64: fixed64, sfixed64, double
-            if offset + 8 > buf.len() {
-                return None;
-            }
-            Some(offset + 8)
-        }
+        0 => decode_varint(buf, offset).map(|(_, end)| end),
+        1 => offset.checked_add(8).filter(|&end| end <= buf.len()),
         2 => {
-            // LEN: string, bytes, embedded messages, packed repeated
-            let (len, new_offset) = decode_varint(buf, offset)?;
-            let end = new_offset + len as usize;
-            if end > buf.len() {
-                return None;
-            }
-            Some(end)
+            let (len, data_offset) = decode_varint(buf, offset)?;
+            let end = data_offset.checked_add(usize::try_from(len).ok()?)?;
+            (end <= buf.len()).then_some(end)
         }
         3 => {
-            // SGROUP (deprecated): must skip nested fields until EGROUP or parsing aborts
+            // Skip inner fields until EGROUP (wire type 4).
             let mut pos = offset;
             loop {
-                if pos >= buf.len() {
-                    return None;
-                }
                 let (inner_tag, new_pos) = decode_varint(buf, pos)?;
-                let inner_wire_type = (inner_tag & 0x07) as u8;
+                let wt = (inner_tag & 0x07) as u8;
                 pos = new_pos;
-                if inner_wire_type == 4 {
+                if wt == 4 {
                     return Some(pos);
                 }
-                pos = skip_field(buf, pos, inner_wire_type)?;
+                pos = skip_field(buf, pos, wt)?;
             }
         }
-        4 => {
-            // EGROUP (deprecated): no payload, just marks end of a group
-            Some(offset)
-        }
-        5 => {
-            // I32: fixed32, sfixed32, float
-            if offset + 4 > buf.len() {
-                return None;
-            }
-            Some(offset + 4)
-        }
+        // EGROUP outside of SGROUP is malformed.
+        4 => None,
+        5 => offset.checked_add(4).filter(|&end| end <= buf.len()),
         _ => None,
     }
 }
 
+/// Decode a single field value. Returns `None` on wire type mismatch or truncation.
 fn decode_field_value(
     buf: &[u8],
     offset: usize,
@@ -212,106 +195,64 @@ fn decode_field_value(
     field_type: &str,
 ) -> Option<String> {
     match field_type {
-        "string" => {
+        "string" | "bytes" => {
             if wire_type != 2 {
                 return None;
             }
             let (len, data_offset) = decode_varint(buf, offset)?;
-            let end = data_offset + len as usize;
+            let len_usize = usize::try_from(len).ok()?;
+            let end = data_offset.checked_add(len_usize)?;
             if end > buf.len() {
                 return None;
             }
-            String::from_utf8(buf[data_offset..end].to_vec()).ok()
+            if field_type == "string" {
+                String::from_utf8(buf[data_offset..end].to_vec()).ok()
+            } else {
+                use base64::Engine;
+                Some(base64::engine::general_purpose::STANDARD.encode(&buf[data_offset..end]))
+            }
         }
-        "bytes" => {
-            if wire_type != 2 {
+        "double" | "fixed64" | "sfixed64" => {
+            if wire_type != 1 {
                 return None;
             }
-            let (len, data_offset) = decode_varint(buf, offset)?;
-            let end = data_offset + len as usize;
+            let end = offset.checked_add(8)?;
             if end > buf.len() {
                 return None;
             }
-            use base64::Engine;
-            Some(base64::engine::general_purpose::STANDARD.encode(&buf[data_offset..end]))
-        }
-        "double" => {
-            if wire_type != 1 {
-                return None;
+            let bytes: [u8; 8] = buf[offset..end].try_into().ok()?;
+            match field_type {
+                "double" => Some(f64::from_le_bytes(bytes).to_string()),
+                "sfixed64" => Some(i64::from_le_bytes(bytes).to_string()),
+                _ => Some(u64::from_le_bytes(bytes).to_string()),
             }
-            if offset + 8 > buf.len() {
-                return None;
-            }
-            let val = f64::from_le_bytes(buf[offset..offset + 8].try_into().ok()?);
-            Some(val.to_string())
         }
-        "float" => {
+        "float" | "fixed32" | "sfixed32" => {
             if wire_type != 5 {
                 return None;
             }
-            if offset + 4 > buf.len() {
+            let end = offset.checked_add(4)?;
+            if end > buf.len() {
                 return None;
             }
-            let val = f32::from_le_bytes(buf[offset..offset + 4].try_into().ok()?);
-            Some(val.to_string())
+            let bytes: [u8; 4] = buf[offset..end].try_into().ok()?;
+            match field_type {
+                "float" => Some(f32::from_le_bytes(bytes).to_string()),
+                "sfixed32" => Some(i32::from_le_bytes(bytes).to_string()),
+                _ => Some(u32::from_le_bytes(bytes).to_string()),
+            }
         }
-        "fixed64" => {
-            if wire_type != 1 {
-                return None;
-            }
-            if offset + 8 > buf.len() {
-                return None;
-            }
-            let val = u64::from_le_bytes(buf[offset..offset + 8].try_into().ok()?);
-            Some(val.to_string())
-        }
-        "sfixed64" => {
-            if wire_type != 1 {
-                return None;
-            }
-            if offset + 8 > buf.len() {
-                return None;
-            }
-            let val = i64::from_le_bytes(buf[offset..offset + 8].try_into().ok()?);
-            Some(val.to_string())
-        }
-        "fixed32" => {
-            if wire_type != 5 {
-                return None;
-            }
-            if offset + 4 > buf.len() {
-                return None;
-            }
-            let val = u32::from_le_bytes(buf[offset..offset + 4].try_into().ok()?);
-            Some(val.to_string())
-        }
-        "sfixed32" => {
-            if wire_type != 5 {
-                return None;
-            }
-            if offset + 4 > buf.len() {
-                return None;
-            }
-            let val = i32::from_le_bytes(buf[offset..offset + 4].try_into().ok()?);
-            Some(val.to_string())
-        }
-        "sint32" => {
+        // ZigZag encoding: https://protobuf.dev/programming-guides/encoding/#signed-ints
+        "sint32" | "sint64" => {
             if wire_type != 0 {
                 return None;
             }
             let (val, _) = decode_varint(buf, offset)?;
-            // ZigZag decode: (val >>> 1) ^ -(val & 1)
-            let decoded = ((val >> 1) as i32) ^ (-((val & 1) as i32));
-            Some(decoded.to_string())
-        }
-        "sint64" => {
-            if wire_type != 0 {
-                return None;
+            if field_type == "sint32" {
+                Some((((val >> 1) as i32) ^ (-((val & 1) as i32))).to_string())
+            } else {
+                Some((((val >> 1) as i64) ^ (-((val & 1) as i64))).to_string())
             }
-            let (val, _) = decode_varint(buf, offset)?;
-            // ZigZag decode: (val >>> 1) ^ -(val & 1)
-            let decoded = ((val >> 1) as i64) ^ (-((val & 1) as i64));
-            Some(decoded.to_string())
         }
         "uint64" | "uint32" | "int64" | "int32" | "bool" | "enum" => {
             if wire_type != 0 {
@@ -447,7 +388,6 @@ mod tests {
         assert!(result.is_none());
     }
 
-    // Helper to build raw protobuf bytes for testing wire types not in factory.proto
     fn encode_varint(value: u64) -> Vec<u8> {
         let mut buf = Vec::new();
         let mut v = value;
@@ -469,105 +409,52 @@ mod tests {
         encode_varint(((field_number as u64) << 3) | wire_type as u64)
     }
 
-    #[test]
-    fn extract_sint32_positive() {
-        // sint32 field 1 = 150 → ZigZag encoded as 300
-        let mut payload = encode_tag(1, 0);
-        payload.extend(encode_varint(300)); // ZigZag(150) = 300
-        let result = extract_field_by_id(&payload, 1, "sint32");
-        assert_eq!(result, Some("150".to_string()));
-    }
-
-    #[test]
-    fn extract_sint32_negative() {
-        // sint32 field 1 = -75 → ZigZag encoded as 149
-        let mut payload = encode_tag(1, 0);
-        payload.extend(encode_varint(149)); // ZigZag(-75) = 149
-        let result = extract_field_by_id(&payload, 1, "sint32");
-        assert_eq!(result, Some("-75".to_string()));
-    }
-
-    #[test]
-    fn extract_sint64_negative() {
-        // sint64 field 1 = -1 → ZigZag encoded as 1
-        let mut payload = encode_tag(1, 0);
-        payload.extend(encode_varint(1)); // ZigZag(-1) = 1
-        let result = extract_field_by_id(&payload, 1, "sint64");
-        assert_eq!(result, Some("-1".to_string()));
-    }
-
-    #[test]
-    fn extract_fixed32() {
-        // fixed32 field 1 = 12345 (wire type 5, 4 bytes LE)
-        let mut payload = encode_tag(1, 5);
-        payload.extend(12345u32.to_le_bytes());
-        let result = extract_field_by_id(&payload, 1, "fixed32");
-        assert_eq!(result, Some("12345".to_string()));
-    }
-
-    #[test]
-    fn extract_sfixed32_negative() {
-        // sfixed32 field 1 = -42 (wire type 5, 4 bytes LE)
-        let mut payload = encode_tag(1, 5);
-        payload.extend((-42i32).to_le_bytes());
-        let result = extract_field_by_id(&payload, 1, "sfixed32");
-        assert_eq!(result, Some("-42".to_string()));
-    }
-
-    #[test]
-    fn extract_fixed64() {
-        // fixed64 field 1 = 9876543210 (wire type 1, 8 bytes LE)
-        let mut payload = encode_tag(1, 1);
-        payload.extend(9876543210u64.to_le_bytes());
-        let result = extract_field_by_id(&payload, 1, "fixed64");
-        assert_eq!(result, Some("9876543210".to_string()));
-    }
-
-    #[test]
-    fn extract_sfixed64_negative() {
-        // sfixed64 field 1 = -100000 (wire type 1, 8 bytes LE)
-        let mut payload = encode_tag(1, 1);
-        payload.extend((-100000i64).to_le_bytes());
-        let result = extract_field_by_id(&payload, 1, "sfixed64");
-        assert_eq!(result, Some("-100000".to_string()));
-    }
-
-    #[test]
-    fn extract_bool_true() {
-        let mut payload = encode_tag(1, 0);
-        payload.extend(encode_varint(1));
-        let result = extract_field_by_id(&payload, 1, "bool");
-        assert_eq!(result, Some("true".to_string()));
-    }
-
-    #[test]
-    fn extract_bool_false() {
-        let mut payload = encode_tag(1, 0);
-        payload.extend(encode_varint(0));
-        let result = extract_field_by_id(&payload, 1, "bool");
-        assert_eq!(result, Some("false".to_string()));
-    }
-
-    #[test]
-    fn extract_enum_value() {
-        let mut payload = encode_tag(1, 0);
-        payload.extend(encode_varint(3));
-        let result = extract_field_by_id(&payload, 1, "enum");
-        assert_eq!(result, Some("3".to_string()));
-    }
-
-    #[test]
-    fn extract_int32_negative() {
-        // int32 -1 is encoded as 10-byte two's complement varint
-        let mut payload = encode_tag(1, 0);
-        payload.extend(encode_varint(u64::MAX)); // -1 in two's complement
-        let result = extract_field_by_id(&payload, 1, "int32");
-        assert_eq!(result, Some("-1".to_string()));
+    #[rstest::rstest]
+    #[case::string("string", 2, {
+        let mut v = encode_varint(5);
+        v.extend(b"hello");
+        v
+    }, "hello")]
+    #[case::bytes("bytes", 2, {
+        let mut v = encode_varint(3);
+        v.extend(&[0xDE, 0xAD, 0xFF]);
+        v
+    }, {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode([0xDE, 0xAD, 0xFF])
+    })]
+    #[case::double("double", 1, 1.5f64.to_le_bytes().to_vec(), "1.5")]
+    #[case::float("float", 5, 2.5f32.to_le_bytes().to_vec(), "2.5")]
+    #[case::fixed64("fixed64", 1, 9876543210u64.to_le_bytes().to_vec(), "9876543210")]
+    #[case::sfixed64("sfixed64", 1, (-100000i64).to_le_bytes().to_vec(), "-100000")]
+    #[case::fixed32("fixed32", 5, 12345u32.to_le_bytes().to_vec(), "12345")]
+    #[case::sfixed32("sfixed32", 5, (-42i32).to_le_bytes().to_vec(), "-42")]
+    #[case::sint32_positive("sint32", 0, encode_varint(300), "150")]
+    #[case::sint32_negative("sint32", 0, encode_varint(149), "-75")]
+    #[case::sint64_negative("sint64", 0, encode_varint(1), "-1")]
+    #[case::uint32("uint32", 0, encode_varint(42), "42")]
+    #[case::uint64("uint64", 0, encode_varint(1700000000000), "1700000000000")]
+    #[case::int32_positive("int32", 0, encode_varint(100), "100")]
+    #[case::int32_negative("int32", 0, encode_varint(u64::MAX), "-1")]
+    #[case::int64_positive("int64", 0, encode_varint(100), "100")]
+    #[case::int64_negative("int64", 0, encode_varint(u64::MAX), "-1")]
+    #[case::bool_true("bool", 0, encode_varint(1), "true")]
+    #[case::bool_false("bool", 0, encode_varint(0), "false")]
+    #[case::enum_value("enum", 0, encode_varint(3), "3")]
+    fn extract_supported_types(
+        #[case] field_type: &str,
+        #[case] wire_type: u8,
+        #[case] field_bytes: Vec<u8>,
+        #[case] expected: impl Into<String>,
+    ) {
+        let mut payload = encode_tag(1, wire_type);
+        payload.extend(field_bytes);
+        let result = extract_field_by_id(&payload, 1, field_type);
+        assert_eq!(result, Some(expected.into()), "field_type={field_type}");
     }
 
     #[test]
     fn extract_last_one_wins() {
-        // Two occurrences of field 1: "first" then "second"
         let mut payload = encode_tag(1, 2);
         payload.extend(encode_varint(5));
         payload.extend(b"first");
@@ -580,16 +467,102 @@ mod tests {
 
     #[test]
     fn skip_group_fields() {
-        // field 1 (group start, wire type 3), nested field 2 (varint 99), field 1 (group end, wire type 4)
-        // then field 3 (string "target")
-        let mut payload = encode_tag(1, 3); // SGROUP
-        payload.extend(encode_tag(2, 0)); // nested varint field
+        let mut payload = encode_tag(1, 3);
+        payload.extend(encode_tag(2, 0));
         payload.extend(encode_varint(99));
-        payload.extend(encode_tag(1, 4)); // EGROUP
-        payload.extend(encode_tag(3, 2)); // our target field
+        payload.extend(encode_tag(1, 4));
+        payload.extend(encode_tag(3, 2));
         payload.extend(encode_varint(6));
         payload.extend(b"target");
         let result = extract_field_by_id(&payload, 3, "string");
         assert_eq!(result, Some("target".to_string()));
+    }
+
+    #[rstest::rstest]
+    #[case::truncated_varint(&[0x08, 0x80])]
+    #[case::truncated_fixed32(&{ let mut v = encode_tag(1, 5); v.extend(&[0x01, 0x02]); v })]
+    #[case::truncated_fixed64(&{ let mut v = encode_tag(1, 1); v.extend(&[0x01, 0x02, 0x03, 0x04]); v })]
+    #[case::truncated_len_delimited(&{ let mut v = encode_tag(1, 2); v.extend(encode_varint(100)); v.extend(b"short"); v })]
+    #[case::overflow_len_delimited(&{ let mut v = encode_tag(1, 2); v.extend(encode_varint(u64::MAX)); v })]
+    #[case::field_number_zero(&encode_tag(0, 0))]
+    #[case::unknown_wire_type_6(&{ let mut v = encode_varint((1 << 3) | 6); v.push(0x00); v })]
+    #[case::unknown_wire_type_7(&{ let mut v = encode_varint((1 << 3) | 7); v.push(0x00); v })]
+    #[case::top_level_egroup(&encode_tag(1, 4))]
+    #[case::empty_payload(&[])]
+    fn malformed_payloads_return_none(#[case] payload: &[u8]) {
+        assert!(extract_field_by_id(payload, 1, "uint32").is_none());
+    }
+
+    #[test]
+    fn wire_type_mismatch_returns_none() {
+        let mut payload = encode_tag(1, 0);
+        payload.extend(encode_varint(42));
+        assert!(extract_field_by_id(&payload, 1, "string").is_none());
+
+        let mut payload = encode_tag(1, 2);
+        payload.extend(encode_varint(3));
+        payload.extend(b"abc");
+        assert!(extract_field_by_id(&payload, 1, "double").is_none());
+    }
+
+    #[test]
+    fn packed_repeated_returns_none() {
+        let mut payload = encode_tag(1, 2);
+        let packed_data = {
+            let mut v = Vec::new();
+            v.extend(encode_varint(1));
+            v.extend(encode_varint(2));
+            v.extend(encode_varint(3));
+            v
+        };
+        payload.extend(encode_varint(packed_data.len() as u64));
+        payload.extend(&packed_data);
+        assert!(extract_field_by_id(&payload, 1, "uint32").is_none());
+    }
+
+    #[test]
+    fn nested_message_not_decoded_as_string() {
+        let inner: Vec<u8> = vec![0x08, 0xFF, 0xFE, 0x01];
+        let mut payload = encode_tag(1, 2);
+        payload.extend(encode_varint(inner.len() as u64));
+        payload.extend(&inner);
+        assert!(extract_field_by_id(&payload, 1, "string").is_none());
+    }
+
+    #[test]
+    fn nested_message_readable_as_bytes() {
+        let inner = {
+            let mut v = encode_tag(1, 0);
+            v.extend(encode_varint(42));
+            v
+        };
+        let mut payload = encode_tag(1, 2);
+        payload.extend(encode_varint(inner.len() as u64));
+        payload.extend(&inner);
+        let result = extract_field_by_id(&payload, 1, "bytes");
+        assert!(result.is_some());
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(result.unwrap())
+            .unwrap();
+        assert_eq!(decoded, inner);
+    }
+
+    #[test]
+    fn repeated_non_packed_returns_last_value() {
+        let mut payload = Vec::new();
+        for val in [10u64, 20, 30] {
+            payload.extend(encode_tag(1, 0));
+            payload.extend(encode_varint(val));
+        }
+        let result = extract_field_by_id(&payload, 1, "uint32");
+        assert_eq!(result, Some("30".to_string()), "last value should win");
+    }
+
+    #[test]
+    fn unsupported_field_type_returns_none() {
+        let mut payload = encode_tag(1, 0);
+        payload.extend(encode_varint(42));
+        assert!(extract_field_by_id(&payload, 1, "message").is_none());
     }
 }
