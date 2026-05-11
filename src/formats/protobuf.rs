@@ -83,12 +83,14 @@ impl FormatHandler for ProtobufHandler {
     }
 
     fn build_attachment(&self, context: AttachmentContext<'_>) -> Result<FormatAttachment> {
-        let schema = self.schema_base64(context.schema_key).ok_or_else(|| {
-            anyhow::anyhow!(
-                "schema '{}' was not loaded in protobuf handler",
-                context.schema_key
-            )
-        })?;
+        let schema = self
+            .schema_base64(context.schema_key)
+            .with_context(|| {
+                format!(
+                    "schema '{}' was not loaded in protobuf handler",
+                    context.schema_key
+                )
+            })?;
         Ok(FormatAttachment {
             key: "$schema".to_string(),
             payload: serde_json::json!({
