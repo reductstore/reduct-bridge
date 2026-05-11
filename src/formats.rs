@@ -42,7 +42,7 @@ pub struct FormatAttachment {
 }
 
 /// Input context for loading a format attachment payload.
-pub struct AttachmentInput<'a> {
+pub struct AttachmentContext<'a> {
     pub schema_key: &'a str,
     pub publish_topic: Option<&'a str>,
     pub schema_name: Option<&'a str>,
@@ -71,6 +71,6 @@ pub trait FormatHandler: Send + Sync {
         field_type: &str,
     ) -> Option<String>;
 
-    /// Load a schema artifact for use as an attachment.
-    fn load_attachment(&self, request: AttachmentInput<'_>) -> Result<FormatAttachment>;
+    /// Build a schema artifact for use as an attachment.
+    fn build_attachment(&self, context: AttachmentContext<'_>) -> Result<FormatAttachment>;
 }

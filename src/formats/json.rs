@@ -4,7 +4,7 @@ use serde_json::Value;
 use anyhow::{Result, bail};
 
 #[cfg(feature = "mqtt")]
-use super::{AttachmentInput, DecodeSchema, FormatAttachment, FormatHandler};
+use super::{AttachmentContext, DecodeSchema, FormatAttachment, FormatHandler};
 
 #[cfg(feature = "mqtt")]
 pub(crate) struct JsonFormatHandler;
@@ -34,7 +34,7 @@ impl FormatHandler for JsonFormatHandler {
         None
     }
 
-    fn load_attachment(&self, _request: AttachmentInput<'_>) -> Result<FormatAttachment> {
+    fn build_attachment(&self, _input: AttachmentContext<'_>) -> Result<FormatAttachment> {
         bail!("JSON format does not provide schema attachments")
     }
 }

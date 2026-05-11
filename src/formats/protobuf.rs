@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use super::{AttachmentInput, DecodeSchema, FormatAttachment, FormatHandler};
+use super::{AttachmentContext, DecodeSchema, FormatAttachment, FormatHandler};
 use crate::formats::json::{extract_json_path, value_to_label};
 
 pub(crate) struct ProtobufHandler {
@@ -52,14 +52,14 @@ impl FormatHandler for ProtobufHandler {
         extract_field_by_id(payload, field_id, field_type)
     }
 
-    fn load_attachment(&self, request: AttachmentInput<'_>) -> Result<FormatAttachment> {
-        let schema = load_descriptor_base64(request.schema_key)?;
+    fn build_attachment(&self, context: AttachmentContext<'_>) -> Result<FormatAttachment> {
+        let schema = load_descriptor_base64(context.schema_key)?;
         Ok(FormatAttachment {
             key: "$schema".to_string(),
             payload: serde_json::json!({
                 "encoding": "protobuf",
-                "topic": request.publish_topic,
-                "schema_name": request.schema_name,
+                "topic": context.publish_topic,
+                "schema_name": context.schema_name,
                 "schema": schema,
             }),
         })
@@ -372,7 +372,7 @@ mod tests {
     fn load_attachment_emits_schema_json_payload() {
         let handler = ProtobufHandler::load(&[TEST_DESCRIPTOR_PATH.to_string()]).unwrap();
         let attachment = handler
-            .load_attachment(AttachmentInput {
+            .build_attachment(AttachmentContext {
                 schema_key: TEST_DESCRIPTOR_PATH,
                 publish_topic: Some("factory/line-1/telemetry"),
                 schema_name: Some("factory.EnvironmentReading"),

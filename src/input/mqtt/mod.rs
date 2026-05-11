@@ -15,7 +15,7 @@
 mod mqtt3;
 mod mqtt5;
 
-use crate::formats::{AttachmentInput, DecodeSchema, FormatAttachment, FormatHandler};
+use crate::formats::{AttachmentContext, DecodeSchema, FormatAttachment, FormatHandler};
 use crate::input::InputLauncher;
 use crate::message::{Attachment, Message};
 use crate::runtime::ComponentRuntime;
@@ -72,12 +72,12 @@ impl FormatHandler for MqttPayloadHandler {
             .extract_field_value(payload, field_id, field_type)
     }
 
-    fn load_attachment(&self, request: AttachmentInput<'_>) -> Result<FormatAttachment> {
+    fn build_attachment(&self, context: AttachmentContext<'_>) -> Result<FormatAttachment> {
         let handler = self
             .protobuf
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No format attachment available for this topic"))?;
-        handler.load_attachment(request)
+        handler.build_attachment(context)
     }
 }
 
@@ -613,7 +613,7 @@ pub(super) async fn emit_attachment(
         Some(p) => p,
         None => return true,
     };
-    let FormatAttachment { key, payload } = match format.load_attachment(AttachmentInput {
+    let FormatAttachment { key, payload } = match format.build_attachment(AttachmentContext {
         schema_key,
         publish_topic: Some(publish_topic),
         schema_name: topic_cfg.schema_name.as_deref(),
