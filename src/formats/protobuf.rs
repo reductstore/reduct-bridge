@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use log::warn;
 use prost_reflect::{DescriptorPool, DynamicMessage};
 use serde_json::Value;
@@ -27,12 +27,11 @@ impl ProtobufHandler {
             }
 
             let bytes = fs::read(Path::new(path))
-                .map_err(|e| anyhow::anyhow!("failed to read descriptor file '{}': {}", path, e))?;
+                .with_context(|| format!("failed to read descriptor file '{}'", path))?;
 
             let artifact = SchemaArtifact {
-                pool: DescriptorPool::decode(bytes.as_slice()).map_err(|e| {
-                    anyhow::anyhow!("failed to decode descriptor file '{}': {}", path, e)
-                })?,
+                pool: DescriptorPool::decode(bytes.as_slice())
+                    .with_context(|| format!("failed to decode descriptor file '{}'", path))?,
                 base64: {
                     use base64::Engine;
                     base64::engine::general_purpose::STANDARD.encode(&bytes)
