@@ -4,15 +4,15 @@ use serde_json::Value;
 use anyhow::{Result, bail};
 
 #[cfg(feature = "mqtt")]
-use super::{AttachmentInput, DecodeInput, FormatAttachment, FormatHandler};
+use super::{AttachmentInput, DecodeSchema, FormatAttachment, FormatHandler};
 
 #[cfg(feature = "mqtt")]
 pub(crate) struct JsonFormatHandler;
 
 #[cfg(feature = "mqtt")]
 impl FormatHandler for JsonFormatHandler {
-    fn decode_payload(&self, request: DecodeInput<'_>) -> Option<Value> {
-        serde_json::from_slice(request.payload).ok()
+    fn decode_payload(&self, payload: &[u8], _schema: Option<DecodeSchema<'_>>) -> Option<Value> {
+        serde_json::from_slice(payload).ok()
     }
 
     fn extract_field_path_value(
