@@ -10,10 +10,17 @@ use super::{AttachmentContext, DecodeFormat, FormatAttachment, FormatHandler};
 pub(crate) struct JsonFormatHandler;
 
 #[cfg(feature = "mqtt")]
+impl JsonFormatHandler {
+    pub(crate) fn decode(&self, payload: &[u8]) -> Option<Value> {
+        serde_json::from_slice(payload).ok()
+    }
+}
+
+#[cfg(feature = "mqtt")]
 impl FormatHandler for JsonFormatHandler {
     fn decode_payload(&self, payload: &[u8], format: DecodeFormat<'_>) -> Option<Value> {
         match format {
-            DecodeFormat::Json => serde_json::from_slice(payload).ok(),
+            DecodeFormat::Json => self.decode(payload),
             _ => None,
         }
     }

@@ -48,11 +48,8 @@ impl MqttPayloadHandler {
 impl FormatHandler for MqttPayloadHandler {
     fn decode_payload(&self, payload: &[u8], format: DecodeFormat<'_>) -> Option<Value> {
         match format {
-            DecodeFormat::Json => self.json.decode_payload(payload, DecodeFormat::Json),
-            DecodeFormat::Protobuf(schema) => self
-                .protobuf
-                .as_ref()?
-                .decode_payload(payload, DecodeFormat::Protobuf(schema)),
+            DecodeFormat::Json => self.json.decode(payload),
+            DecodeFormat::Protobuf(schema) => self.protobuf.as_ref()?.decode(payload, schema),
             DecodeFormat::Other(_) => None,
         }
     }

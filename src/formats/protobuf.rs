@@ -10,19 +10,49 @@ use super::{AttachmentContext, DecodeFormat, FormatAttachment, FormatHandler};
 use crate::formats::json::{extract_json_path, value_to_label};
 
 pub(crate) struct ProtobufHandler {
-    descriptors: HashMap<String, DescriptorPool>,
+    schemas: HashMap<String, SchemaArtifact>,
+}
+
+struct SchemaArtifact {
+    pool: DescriptorPool,
+    base64: String,
 }
 
 impl ProtobufHandler {
     pub(crate) fn load(paths: &[String]) -> Result<Self> {
-        let mut descriptors = HashMap::new();
+        let mut schemas: HashMap<String, SchemaArtifact> = HashMap::new();
         for path in paths {
-            if !descriptors.contains_key(path) {
-                let pool = load_descriptor(path)?;
-                descriptors.insert(path.clone(), pool);
+            if schemas.contains_key(path) {
+                continue;
             }
+
+            let bytes = fs::read(Path::new(path))
+                .map_err(|e| anyhow::anyhow!("failed to read descriptor file '{}': {}", path, e))?;
+
+            let artifact = SchemaArtifact {
+                pool: DescriptorPool::decode(bytes.as_slice()).map_err(|e| {
+                    anyhow::anyhow!("failed to decode descriptor file '{}': {}", path, e)
+                })?,
+                base64: {
+                    use base64::Engine;
+                    base64::engine::general_purpose::STANDARD.encode(&bytes)
+                },
+            };
+
+            schemas.insert(path.clone(), artifact);
         }
-        Ok(Self { descriptors })
+        Ok(Self { schemas })
+    }
+
+    pub(crate) fn decode(&self, payload: &[u8], schema: super::DecodeSchema<'_>) -> Option<Value> {
+        let artifact = self.schemas.get(schema.key)?;
+        decode_protobuf(&artifact.pool, schema.type_name, payload)
+    }
+
+    fn schema_base64(&self, schema_key: &str) -> Option<&str> {
+        self.schemas
+            .get(schema_key)
+            .map(|artifact| artifact.base64.as_str())
     }
 }
 
@@ -31,8 +61,7 @@ impl FormatHandler for ProtobufHandler {
         let DecodeFormat::Protobuf(schema) = format else {
             return None;
         };
-        let pool = self.descriptors.get(schema.key)?;
-        decode_protobuf(pool, schema.type_name, payload)
+        self.decode(payload, schema)
     }
 
     fn extract_field_path_value(
@@ -55,7 +84,12 @@ impl FormatHandler for ProtobufHandler {
     }
 
     fn build_attachment(&self, context: AttachmentContext<'_>) -> Result<FormatAttachment> {
-        let schema = load_descriptor_base64(context.schema_key)?;
+        let schema = self.schema_base64(context.schema_key).ok_or_else(|| {
+            anyhow::anyhow!(
+                "schema '{}' was not loaded in protobuf handler",
+                context.schema_key
+            )
+        })?;
         Ok(FormatAttachment {
             key: "$schema".to_string(),
             payload: serde_json::json!({
@@ -66,13 +100,6 @@ impl FormatHandler for ProtobufHandler {
             }),
         })
     }
-}
-
-fn load_descriptor(path: &str) -> Result<DescriptorPool> {
-    let bytes = fs::read(Path::new(path))
-        .map_err(|e| anyhow::anyhow!("failed to read descriptor file '{}': {}", path, e))?;
-    DescriptorPool::decode(bytes.as_slice())
-        .map_err(|e| anyhow::anyhow!("failed to decode descriptor file '{}': {}", path, e))
 }
 
 fn decode_protobuf(pool: &DescriptorPool, message_name: &str, payload: &[u8]) -> Option<Value> {
@@ -303,13 +330,6 @@ fn decode_field_value(
             None
         }
     }
-}
-
-fn load_descriptor_base64(path: &str) -> Result<String> {
-    let bytes = fs::read(Path::new(path))
-        .map_err(|e| anyhow::anyhow!("failed to read descriptor file '{}': {}", path, e))?;
-    use base64::Engine;
-    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 
 #[cfg(test)]
