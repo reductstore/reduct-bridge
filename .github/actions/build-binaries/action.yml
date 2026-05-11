@@ -125,7 +125,7 @@ runs:
           source "${{ inputs.ros-setup-script }}"
           set -u
         fi
-        cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --bins ${{ inputs.cargo-args }}
+        cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --bins ${{ inputs.cargo-args }} --features ci
 
     - name: Build and export tests (Release)
       if: github.event_name != 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'

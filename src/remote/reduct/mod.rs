@@ -330,8 +330,26 @@ prefix = ""
     }
 }
 
+#[cfg(test)]
+mod unit_tests {
+    use super::ReductInstance;
+
+    #[test]
+    fn normalize_entry_path_collapses_extra_slashes() {
+        assert_eq!(
+            ReductInstance::normalize_entry_path("ros_data/", "/tf"),
+            Some("ros_data/tf".to_string())
+        );
+        assert_eq!(
+            ReductInstance::normalize_entry_path("/root//", "//a//b/"),
+            Some("root/a/b".to_string())
+        );
+        assert_eq!(ReductInstance::normalize_entry_path("/", "//"), None);
+    }
+}
+
 #[cfg(all(test, feature = "ci"))]
-mod tests {
+mod ci_tests {
     use super::{CreateBucketConfig, ReductInstance, RemoteConfig};
     #[cfg(any(feature = "ros1", feature = "ros2"))]
     use crate::message::Attachment;
@@ -344,15 +362,9 @@ mod tests {
     #[cfg(any(feature = "ros1", feature = "ros2"))]
     use serde_json::json;
     use std::collections::HashMap;
-    use std::net::TcpListener;
-    use std::process::Command;
+    use std::env;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tokio::time::sleep;
-
-    fn free_port() -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind free port");
-        listener.local_addr().expect("local addr").port()
-    }
 
     fn unique_suffix() -> String {
         format!(
@@ -365,52 +377,12 @@ mod tests {
         )
     }
 
-    fn run_command(args: &[&str]) -> std::process::Output {
-        Command::new(args[0])
-            .args(&args[1..])
-            .output()
-            .expect("run command")
+    fn reductstore_url() -> String {
+        env::var("REDUCTSTORE_URL").unwrap_or_else(|_| "http://127.0.0.1:8383".to_string())
     }
 
-    struct DockerGuard {
-        container: String,
-    }
-
-    impl Drop for DockerGuard {
-        fn drop(&mut self) {
-            if std::thread::panicking() {
-                let logs = run_command(&["docker", "logs", &self.container]);
-                eprintln!("=== ReductStore logs ({}) ===", self.container);
-                if !logs.stdout.is_empty() {
-                    eprintln!("{}", String::from_utf8_lossy(&logs.stdout));
-                }
-                if !logs.stderr.is_empty() {
-                    eprintln!("{}", String::from_utf8_lossy(&logs.stderr));
-                }
-            }
-            let _ = run_command(&["docker", "rm", "-f", &self.container]);
-        }
-    }
-
-    async fn start_reductstore(container: &str, port: u16) -> ReductClient {
-        let start = run_command(&[
-            "docker",
-            "run",
-            "-d",
-            "--rm",
-            "--name",
-            container,
-            "-p",
-            &format!("{port}:8383"),
-            "reduct/store:main",
-        ]);
-        assert!(
-            start.status.success(),
-            "failed to start docker: {}",
-            String::from_utf8_lossy(&start.stderr)
-        );
-
-        let url = format!("http://127.0.0.1:{port}");
+    async fn reductstore_client() -> ReductClient {
+        let url = reductstore_url();
         let client = ReductClient::builder().url(&url).api_token("").build();
         let mut alive = false;
         for _ in 0..40 {
@@ -491,32 +463,13 @@ mod tests {
         })
     }
 
-    #[test]
-    fn normalize_entry_path_collapses_extra_slashes() {
-        assert_eq!(
-            ReductInstance::normalize_entry_path("ros_data/", "/tf"),
-            Some("ros_data/tf".to_string())
-        );
-        assert_eq!(
-            ReductInstance::normalize_entry_path("/root//", "//a//b/"),
-            Some("root/a/b".to_string())
-        );
-        assert_eq!(ReductInstance::normalize_entry_path("/", "//"), None);
-    }
-
     #[rstest]
     #[tokio::test]
-    async fn docker_reductstore_creates_missing_bucket(data_message: Message) {
-        let port = free_port();
+    async fn ci_reductstore_creates_missing_bucket(data_message: Message) {
         let suffix = unique_suffix();
-        let container = format!("reduct-bridge-test-{suffix}");
         let bucket_name = format!("it-{suffix}");
-        let url = format!("http://127.0.0.1:{port}");
-
-        let _guard = DockerGuard {
-            container: container.clone(),
-        };
-        let client = start_reductstore(&container, port).await;
+        let url = reductstore_url();
+        let client = reductstore_client().await;
 
         let remote = ReductInstance::new(remote_config(
             url,
@@ -543,17 +496,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn docker_reductstore_existing_bucket_is_not_modified(data_message: Message) {
-        let port = free_port();
+    async fn ci_reductstore_existing_bucket_is_not_modified(data_message: Message) {
         let suffix = unique_suffix();
-        let container = format!("reduct-bridge-test-{suffix}");
         let bucket_name = format!("it-{suffix}");
-        let url = format!("http://127.0.0.1:{port}");
-
-        let _guard = DockerGuard {
-            container: container.clone(),
-        };
-        let client = start_reductstore(&container, port).await;
+        let url = reductstore_url();
+        let client = reductstore_client().await;
         client
             .create_bucket(&bucket_name)
             .quota_type(QuotaType::HARD)
@@ -586,17 +533,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn docker_reductstore_missing_bucket_without_create_config_fails() {
-        let port = free_port();
+    async fn ci_reductstore_missing_bucket_without_create_config_fails() {
         let suffix = unique_suffix();
-        let container = format!("reduct-bridge-test-{suffix}");
         let bucket_name = format!("it-{suffix}");
-        let url = format!("http://127.0.0.1:{port}");
-
-        let _guard = DockerGuard {
-            container: container.clone(),
-        };
-        let _client = start_reductstore(&container, port).await;
+        let url = reductstore_url();
+        let _client = reductstore_client().await;
 
         let remote = ReductInstance::new(remote_config(url, bucket_name, None));
         let err = remote
@@ -613,21 +554,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[cfg(any(feature = "ros1", feature = "ros2"))]
-    async fn docker_reductstore_roundtrip_data_and_attachment(
+    async fn ci_reductstore_roundtrip_data_and_attachment(
         data_message: Message,
         ros_attachment_message: Message,
     ) {
-        let port = free_port();
         let suffix = unique_suffix();
-        let container = format!("reduct-bridge-test-{suffix}");
         let bucket_name = format!("it-{suffix}");
-        let url = format!("http://127.0.0.1:{port}");
-
-        let _guard = DockerGuard {
-            container: container.clone(),
-        };
-
-        let client = start_reductstore(&container, port).await;
+        let url = reductstore_url();
+        let client = reductstore_client().await;
 
         client
             .create_bucket(&bucket_name)
@@ -636,7 +570,7 @@ mod tests {
             .await
             .expect("create bucket");
 
-        let remote = ReductInstance::new(remote_config(url.clone(), bucket_name.clone(), None));
+        let remote = ReductInstance::new(remote_config(url, bucket_name.clone(), None));
 
         let runtime = remote.launch().await.expect("launch remote");
         runtime.tx.send(data_message).await.expect("send data");
