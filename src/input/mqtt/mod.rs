@@ -21,7 +21,7 @@ use crate::formats::{
 use crate::input::InputLauncher;
 use crate::message::{Attachment, Message};
 use crate::runtime::ComponentRuntime;
-use anyhow::{Error, Result, bail};
+use anyhow::{Context, Error, Result, bail};
 use async_trait::async_trait;
 use log::{info, warn};
 use serde::Deserialize;
@@ -75,10 +75,12 @@ impl FormatHandler for MqttPayloadHandler {
     }
 
     fn build_attachment(&self, context: AttachmentContext<'_>) -> Result<FormatAttachment> {
-        let handler = self
-            .protobuf
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No format attachment available for this topic"))?;
+        let handler = self.protobuf.as_ref().with_context(|| {
+            format!(
+                "no protobuf handler loaded for schema '{}'",
+                context.schema_key
+            )
+        })?;
         handler.build_attachment(context)
     }
 }
