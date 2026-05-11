@@ -1,6 +1,6 @@
 [package]
 name = "reduct-bridge"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 
 
@@ -28,7 +28,7 @@ async-trait = "0.1.89"
 toml = "1.0.3"
 serde = { version = "1.0.228", features = ["derive"] }
 bytes = "1.11.1"
-reduct-rs = { git = "https://github.com/reductstore/reduct-rs.git", version = "1.19.0" }
+reduct-rs = {  version = "1.19.1" }
 anyhow = "1.0.102"
 log = "0.4.28"
 env_logger = "0.11.8"

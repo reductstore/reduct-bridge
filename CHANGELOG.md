@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.2.0 - 2026-05-11
+
 ### Added
 
 - Metrics input for CPU, memory, and disk with JSON output and label mapping, [PR-19](https://github.com/reductstore/reduct-bridge/pull/19)
