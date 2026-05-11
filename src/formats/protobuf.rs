@@ -314,9 +314,15 @@ fn load_descriptor_base64(path: &str) -> Result<String> {
 mod tests {
     use super::*;
     use prost::Message;
+    const TEST_DESCRIPTOR_PATH: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/formats/testdata/proto.desc"
+    );
+
+    const TEST_DESCRIPTOR_BYTES: &[u8] = include_bytes!("testdata/proto.desc");
 
     fn test_descriptor_pool() -> DescriptorPool {
-        load_descriptor("dev/mqtt/factory.desc").unwrap()
+        DescriptorPool::decode(TEST_DESCRIPTOR_BYTES).unwrap()
     }
 
     fn encode_environment_reading() -> Vec<u8> {
@@ -364,10 +370,10 @@ mod tests {
 
     #[test]
     fn load_attachment_emits_schema_json_payload() {
-        let handler = ProtobufHandler::load(&["dev/mqtt/factory.desc".to_string()]).unwrap();
+        let handler = ProtobufHandler::load(&[TEST_DESCRIPTOR_PATH.to_string()]).unwrap();
         let attachment = handler
             .load_attachment(AttachmentInput {
-                schema_key: "dev/mqtt/factory.desc",
+                schema_key: TEST_DESCRIPTOR_PATH,
                 publish_topic: Some("factory/line-1/telemetry"),
                 schema_name: Some("factory.EnvironmentReading"),
             })
