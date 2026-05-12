@@ -283,19 +283,19 @@ mod config_tests {
     use crate::cfg::{find_named_entry, parse_entry};
     use bytesize::ByteSize;
     use reduct_rs::QuotaType;
+    use rstest::rstest;
     use toml::Value;
 
-    fn parse_reduct_remote(config_text: &str) -> RemoteConfig {
+    fn parse_reduct_remote_config(config_text: &str) -> anyhow::Result<RemoteConfig> {
         let config: Value = toml::from_str(config_text).expect("parse toml");
         let (remote_type, remote_table) =
             find_named_entry(&config, "remotes", "local").expect("find remote");
         assert_eq!(remote_type, "reduct");
-        parse_entry(remote_table).expect("parse remote config")
+        parse_entry(remote_table)
     }
 
-    #[test]
-    fn parses_create_bucket_config_from_toml() {
-        let cfg = parse_reduct_remote(
+    fn build_remote_config(create_bucket: &str) -> String {
+        format!(
             r#"
 [[remotes.reduct]]
 name = "local"
@@ -303,52 +303,56 @@ url = "http://localhost:8383"
 token_api = ""
 bucket = "my-bucket"
 prefix = ""
-
-[remotes.reduct.create_bucket]
-quota_type = "FIFO"
-quota_size = 1073741824
-"#,
-        );
-
-        let create_bucket = cfg.create_bucket.expect("create_bucket config");
-        assert_eq!(create_bucket.quota_type, QuotaType::FIFO);
-        assert_eq!(create_bucket.quota_size, ByteSize(1073741824));
+{create_bucket}
+"#
+        )
     }
 
-    #[test]
-    fn parses_create_bucket_config_with_size_units_from_toml() {
-        let cfg = parse_reduct_remote(
+    #[rstest]
+    #[case("1073741824", ByteSize(1073741824))]
+    #[case("\"1GB\"", ByteSize(1_000_000_000))]
+    #[case("\"4GiB\"", ByteSize(4 * 1024 * 1024 * 1024))]
+    fn parses_create_bucket_config_from_toml(
+        #[case] quota_size: &str,
+        #[case] expected_size: ByteSize,
+    ) {
+        let cfg = parse_reduct_remote_config(&build_remote_config(&format!(
             r#"
-[[remotes.reduct]]
-name = "local"
-url = "http://localhost:8383"
-token_api = ""
-bucket = "my-bucket"
-prefix = ""
 
 [remotes.reduct.create_bucket]
 quota_type = "FIFO"
-quota_size = "1GB"
-"#,
-        );
+quota_size = {quota_size}
+"#
+        )))
+        .expect("parse remote config");
 
         let create_bucket = cfg.create_bucket.expect("create_bucket config");
         assert_eq!(create_bucket.quota_type, QuotaType::FIFO);
-        assert_eq!(create_bucket.quota_size.as_u64(), 1_000_000_000);
+        assert_eq!(create_bucket.quota_size, expected_size);
+    }
+
+    #[rstest]
+    #[case("\"10XB\"")]
+    #[case("\"abc\"")]
+    fn rejects_create_bucket_config_with_invalid_size_unit(#[case] quota_size: &str) {
+        let err = parse_reduct_remote_config(&build_remote_config(&format!(
+            r#"
+
+[remotes.reduct.create_bucket]
+quota_type = "FIFO"
+quota_size = {quota_size}
+"#
+        )))
+        .expect_err("invalid quota_size should fail");
+
+        let message = err.to_string();
+        assert!(message.contains("Failed to deserialize section entry"));
     }
 
     #[test]
     fn omits_create_bucket_config_by_default() {
-        let cfg = parse_reduct_remote(
-            r#"
-[[remotes.reduct]]
-name = "local"
-url = "http://localhost:8383"
-token_api = ""
-bucket = "my-bucket"
-prefix = ""
-"#,
-        );
+        let cfg =
+            parse_reduct_remote_config(&build_remote_config("")).expect("parse remote config");
 
         assert!(cfg.create_bucket.is_none());
     }

@@ -41,6 +41,9 @@ batch_max_interval_ms = 1000
 quota_type = "FIFO"
 
 # Required when create_bucket is configured: quota size as bytes or a unit string.
+# Accepted examples: 1073741824, "1GB", "512MB", "4GiB", "1.5TiB", "500 B".
+# Accepted decimal units: B, K/KB, M/MB, G/GB, T/TB, P/PB, E/EB.
+# Accepted binary units: Ki/KiB, Mi/MiB, Gi/GiB, Ti/TiB, Pi/PiB, Ei/EiB.
 quota_size = "1GB"
 ```
 
