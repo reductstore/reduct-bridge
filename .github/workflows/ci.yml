@@ -137,6 +137,9 @@ jobs:
         with:
           name: ${{ matrix.artifact_prefix }}-tests-x86_64-unknown-linux-gnu
           path: ./tmp/tests
+      - uses: ./.github/actions/run-reductstore
+        with:
+          container_name: reduct-store-unit-${{ matrix.artifact_prefix }}
       - uses: ./.github/actions/unit-tests
         with:
           os: ${{ matrix.os }}
@@ -268,6 +271,9 @@ jobs:
           required-ros-distributions: jazzy
       - name: Install ROS2 interface packages
         run: sudo apt-get update && sudo apt-get install -y ros-jazzy-example-interfaces ros-jazzy-test-msgs
+      - uses: ./.github/actions/run-reductstore
+        with:
+          container_name: reduct-store-coverage
 
       - uses: ./.github/actions/coverage
         with:

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional ReductStore bucket creation via `[remotes.reduct.create_bucket]`, with configurable `quota_type`, numeric or human-readable `quota_size` values such as `"1GB"` and `"4GiB"`, updated examples/docs, and parsing coverage for valid and invalid unit strings, [PR-34](https://github.com/reductstore/reduct-bridge/pull/34).
+
 ## 0.2.0 - 2026-05-11
 
 ### Added
