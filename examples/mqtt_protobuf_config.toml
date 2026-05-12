@@ -1,0 +1,31 @@
+# Protobuf MQTT example using descriptor-backed field-path labels.
+
+[[remotes.reduct]]
+name = "local"
+url = "http://localhost:8383"
+token_api = "***"
+bucket = "mqtt-protobuf"
+prefix = ""
+
+[inputs.mqtt.protobuf]
+broker = "mqtt://localhost:1883"
+client_id = "reduct-bridge-protobuf"
+version = "v5"
+qos = 1
+entry_prefix = "/mqtt"
+
+[[inputs.mqtt.protobuf.topics]]
+name = "factory/electrical/+/power"
+entry_name = "power"
+content_type = "application/protobuf"
+schema_path = "./factory.desc"
+schema_name = "factory.PowerReading"
+labels = [
+  { field = "device_id", label = "meter_id" },
+  { field = "panel", label = "panel" },
+  { static = { source = "mqtt-protobuf" } }
+]
+
+[pipelines.mqtt_protobuf]
+remote = "local"
+inputs = ["protobuf"]
