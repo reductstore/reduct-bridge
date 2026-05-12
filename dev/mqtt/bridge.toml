@@ -27,7 +27,7 @@ prefix = ""
 
 # =============================================================================
 # INPUT: Protobuf WITH schema file (labels by field NAME)
-# The schema + schema_name let the bridge decode the binary payload
+# The schema_path + schema_name let the bridge decode the binary payload
 # into JSON, then extract labels by field name (just like JSON payloads).
 # Also attaches the .desc file in `$schema` JSON so consumers can decode later.
 # =============================================================================
@@ -42,7 +42,7 @@ entry_prefix = ""
 [[inputs.mqtt.main.topics]]
 name = "factory/+/environment"
 content_type = "application/protobuf"
-schema = "/app/factory.desc"
+schema_path = "/app/factory.desc"
 schema_name = "factory.EnvironmentReading"
 
 [[inputs.mqtt.main.topics.labels]]
@@ -56,7 +56,7 @@ label = "line"
 [[inputs.mqtt.main.topics]]
 name = "factory/machines/+/vibration/+"
 content_type = "application/protobuf"
-schema = "/app/factory.desc"
+schema_path = "/app/factory.desc"
 schema_name = "factory.VibrationSpectrum"
 
 [[inputs.mqtt.main.topics.labels]]
@@ -70,7 +70,7 @@ label = "machine"
 [[inputs.mqtt.main.topics]]
 name = "factory/electrical/+/power"
 content_type = "application/protobuf"
-schema = "/app/factory.desc"
+schema_path = "/app/factory.desc"
 schema_name = "factory.PowerReading"
 
 [[inputs.mqtt.main.topics.labels]]
@@ -83,7 +83,7 @@ label = "panel"
 
 # =============================================================================
 # INPUT: Protobuf WITHOUT schema file (labels by field ID)
-# No schema/schema_name means the bridge extracts labels directly
+# No schema_path/schema_name means the bridge extracts labels directly
 # from wire bytes using field_id + field_type.
 # =============================================================================
 

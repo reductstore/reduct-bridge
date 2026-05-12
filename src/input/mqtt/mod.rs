@@ -17,11 +17,12 @@ mod mqtt5;
 
 use crate::formats::{
     AttachmentContext, DecodeFormat, DecodeSchema, FormatAttachment, FormatHandler,
+    PayloadFormatHandler,
 };
 use crate::input::InputLauncher;
 use crate::message::{Attachment, Message};
 use crate::runtime::ComponentRuntime;
-use anyhow::{Context, Error, Result, bail};
+use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
 use log::{info, warn};
 use serde::Deserialize;
@@ -30,60 +31,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::Sender;
-
-struct MqttPayloadHandler {
-    json: crate::formats::json::JsonFormatHandler,
-    protobuf: Option<crate::formats::protobuf::ProtobufHandler>,
-}
-
-impl MqttPayloadHandler {
-    fn new(protobuf: Option<crate::formats::protobuf::ProtobufHandler>) -> Self {
-        Self {
-            json: crate::formats::json::JsonFormatHandler,
-            protobuf,
-        }
-    }
-}
-
-impl FormatHandler for MqttPayloadHandler {
-    fn decode_payload(&self, payload: &[u8], format: DecodeFormat<'_>) -> Option<Value> {
-        match format {
-            DecodeFormat::Json => self.json.decode(payload),
-            DecodeFormat::Protobuf(schema) => self.protobuf.as_ref()?.decode(payload, schema),
-            DecodeFormat::Other(_) => None,
-        }
-    }
-
-    fn extract_field_path_value(
-        &self,
-        decoded_payload: Option<&Value>,
-        field_path: &str,
-    ) -> Option<String> {
-        self.json
-            .extract_field_path_value(decoded_payload, field_path)
-    }
-
-    fn extract_field_value(
-        &self,
-        payload: &[u8],
-        field_id: u32,
-        field_type: &str,
-    ) -> Option<String> {
-        self.protobuf
-            .as_ref()?
-            .extract_field_value(payload, field_id, field_type)
-    }
-
-    fn build_attachment(&self, context: AttachmentContext<'_>) -> Result<FormatAttachment> {
-        let handler = self.protobuf.as_ref().with_context(|| {
-            format!(
-                "no protobuf handler loaded for schema '{}'",
-                context.schema_key
-            )
-        })?;
-        handler.build_attachment(context)
-    }
-}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -119,7 +66,8 @@ pub struct MqttTopicConfig {
     #[serde(default)]
     pub content_type: Option<String>,
     #[serde(default)]
-    pub schema: Option<String>,
+    #[serde(alias = "schema")]
+    pub schema_path: Option<String>,
     #[serde(default)]
     pub schema_name: Option<String>,
     #[serde(default)]
@@ -215,9 +163,9 @@ impl MqttInstance {
             {
                 bail!("MQTT v3 input does not support property label rules");
             }
-            if topic.schema.is_some() != topic.schema_name.is_some() {
+            if topic.schema_path.is_some() != topic.schema_name.is_some() {
                 bail!(
-                    "MQTT topic '{}': schema and schema_name must both be set or both omitted",
+                    "MQTT topic '{}': schema_path and schema_name must both be set or both omitted",
                     topic.name
                 );
             }
@@ -229,7 +177,7 @@ impl MqttInstance {
                     &topic.name,
                     rule,
                     payload_format,
-                    topic.schema.is_some(),
+                    topic.schema_path.is_some(),
                 )?;
             }
         }
@@ -297,9 +245,9 @@ impl MqttInstance {
         topic: &MqttTopicConfig,
         payload_format: PayloadFormat,
     ) -> Result<()> {
-        if topic.schema.is_some() && payload_format != PayloadFormat::Protobuf {
+        if topic.schema_path.is_some() && payload_format != PayloadFormat::Protobuf {
             bail!(
-                "MQTT topic '{}': schema/schema_name require protobuf content_type",
+                "MQTT topic '{}': schema_path/schema_name require protobuf content_type",
                 topic_name
             );
         }
@@ -336,7 +284,7 @@ impl MqttInstance {
                 PayloadFormat::Protobuf => {
                     if !has_schema {
                         bail!(
-                            "MQTT topic '{}': protobuf field-path labels require schema/schema_name",
+                            "MQTT topic '{}': protobuf field-path labels require schema_path/schema_name",
                             topic_name
                         );
                     }
@@ -529,7 +477,7 @@ fn decode_payload_for_labels(
         PayloadFormat::Json => format.decode_payload(payload, DecodeFormat::Json),
         PayloadFormat::Protobuf => {
             if let (Some(schema_key), Some(type_name)) = (
-                topic_cfg.schema.as_deref(),
+                topic_cfg.schema_path.as_deref(),
                 topic_cfg.schema_name.as_deref(),
             ) {
                 return format.decode_payload(
@@ -613,7 +561,7 @@ pub(super) async fn emit_attachment(
     format: &dyn FormatHandler,
     pipeline_tx: &Sender<Message>,
 ) -> bool {
-    let schema_key = match &topic_cfg.schema {
+    let schema_key = match &topic_cfg.schema_path {
         Some(p) => p,
         None => return true,
     };
@@ -625,7 +573,7 @@ pub(super) async fn emit_attachment(
         Ok(a) => a,
         Err(err) => {
             warn!(
-                "Failed to load format attachment for schema '{}': {}",
+                "Failed to load format attachment for schema path '{}': {}",
                 schema_key, err
             );
             return false;
@@ -645,7 +593,7 @@ pub(super) async fn emit_attachment(
     true
 }
 
-fn load_payload_handler(cfg: &MqttConfig) -> Result<Arc<MqttPayloadHandler>> {
+fn load_payload_handler(cfg: &MqttConfig) -> Result<Arc<PayloadFormatHandler>> {
     use crate::formats::protobuf::ProtobufHandler;
 
     let has_format = |fmt| {
@@ -655,13 +603,17 @@ fn load_payload_handler(cfg: &MqttConfig) -> Result<Arc<MqttPayloadHandler>> {
     };
 
     let protobuf = if has_format(PayloadFormat::Protobuf) {
-        let paths: Vec<String> = cfg.topics.iter().filter_map(|t| t.schema.clone()).collect();
+        let paths: Vec<String> = cfg
+            .topics
+            .iter()
+            .filter_map(|t| t.schema_path.clone())
+            .collect();
         Some(ProtobufHandler::load(&paths)?)
     } else {
         None
     };
 
-    Ok(Arc::new(MqttPayloadHandler::new(protobuf)))
+    Ok(Arc::new(PayloadFormatHandler::new(protobuf)))
 }
 
 pub(super) fn ensure_rustls_crypto_provider() {
@@ -709,10 +661,11 @@ impl InputLauncher for MqttInstance {
 #[cfg(test)]
 mod tests {
     use super::{
-        BrokerScheme, MqttConfig, MqttInstance, MqttLabelRule, MqttPayloadHandler, MqttTopicConfig,
-        MqttVersion, build_record_labels, entry_name, find_topic_config, mqtt_topic_matches, mqtt3,
-        mqtt5, parse_broker, resolve_entry_name,
+        BrokerScheme, MqttConfig, MqttInstance, MqttLabelRule, MqttTopicConfig, MqttVersion,
+        build_record_labels, entry_name, find_topic_config, mqtt_topic_matches, mqtt3, mqtt5,
+        parse_broker, resolve_entry_name,
     };
+    use crate::formats::PayloadFormatHandler;
     use crate::formats::protobuf::ProtobufHandler;
     use bytes::Bytes;
     use rstest::{fixture, rstest};
@@ -729,7 +682,7 @@ mod tests {
                 name: "factory/+/telemetry".to_string(),
                 entry_name: None,
                 content_type: None,
-                schema: None,
+                schema_path: None,
                 schema_name: None,
                 labels: Vec::new(),
             }],
@@ -852,7 +805,7 @@ mod tests {
                     name: "factory/+/events".to_string(),
                     entry_name: None,
                     content_type: None,
-                    schema: None,
+                    schema_path: None,
                     schema_name: None,
                     labels: Vec::new(),
                 },
@@ -860,7 +813,7 @@ mod tests {
                     name: "factory/+/telemetry".to_string(),
                     entry_name: Some("telemetry".to_string()),
                     content_type: Some("application/json".to_string()),
-                    schema: None,
+                    schema_path: None,
                     schema_name: None,
                     labels: Vec::new(),
                 },
@@ -880,7 +833,7 @@ mod tests {
             name: "factory/+/telemetry".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: None,
-            schema: None,
+            schema_path: None,
             schema_name: None,
             labels: Vec::new(),
         };
@@ -985,7 +938,7 @@ mod tests {
             &mqtt_cfg_with_payload_labels.topics[0],
             br#"{"device_id":"dev-1","site":"lab"}"#,
             None,
-            &MqttPayloadHandler::new(None),
+            &PayloadFormatHandler::new(None),
         );
 
         assert_eq!(labels.get("device"), Some(&"dev-1".to_string()));
@@ -1012,7 +965,7 @@ mod tests {
             &mqtt_cfg.topics[0],
             br#"{"device_id":"dev-1"}"#,
             None,
-            &MqttPayloadHandler::new(None),
+            &PayloadFormatHandler::new(None),
         );
 
         assert_eq!(labels.get("source"), Some(&"mqtt-static".to_string()));
@@ -1024,7 +977,7 @@ mod tests {
             &mqtt_cfg_with_payload_labels.topics[0],
             b"plain text payload",
             None,
-            &MqttPayloadHandler::new(None),
+            &PayloadFormatHandler::new(None),
         );
 
         assert_eq!(labels.get("device"), None);
@@ -1052,7 +1005,7 @@ mod tests {
             &mqtt_cfg.topics[0],
             payload,
             None,
-            &MqttPayloadHandler::new(Some(ProtobufHandler::load(&[]).unwrap())),
+            &PayloadFormatHandler::new(Some(ProtobufHandler::load(&[]).unwrap())),
         );
 
         assert_eq!(labels.get("sensor_id"), Some(&"dev-1".to_string()));
@@ -1067,7 +1020,7 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
-            schema: None,
+            schema_path: None,
             schema_name: None,
             labels: Vec::new(),
         }];
@@ -1093,7 +1046,7 @@ mod tests {
             payload: Bytes::from_static(br#"{"device_id":"dev-1"}"#),
         };
 
-        let record = mqtt3::build_v3_record(&cfg, &publish, &MqttPayloadHandler::new(None));
+        let record = mqtt3::build_v3_record(&cfg, &publish, &PayloadFormatHandler::new(None));
 
         assert_eq!(record.entry_name, "mqtt/factory/device-1");
         assert_eq!(
@@ -1135,7 +1088,7 @@ mod tests {
             &cfg.topics[0],
             publish.payload.as_ref(),
             Some(&resolver),
-            &MqttPayloadHandler::new(None),
+            &PayloadFormatHandler::new(None),
         );
 
         assert_eq!(labels.get("mime"), Some(&"application/json".to_string()));
@@ -1168,7 +1121,7 @@ mod tests {
             &cfg.topics[0],
             publish.payload.as_ref(),
             Some(&resolver),
-            &MqttPayloadHandler::new(None),
+            &PayloadFormatHandler::new(None),
         );
 
         assert_eq!(labels.get("mime"), None);
@@ -1198,7 +1151,7 @@ mod tests {
             &cfg.topics[0],
             publish.payload.as_ref(),
             Some(&resolver),
-            &MqttPayloadHandler::new(None),
+            &PayloadFormatHandler::new(None),
         );
 
         assert_eq!(labels.get("group"), None);
@@ -1227,7 +1180,7 @@ mod tests {
             &cfg.topics[0],
             publish.payload.as_ref(),
             Some(&resolver),
-            &MqttPayloadHandler::new(None),
+            &PayloadFormatHandler::new(None),
         );
 
         assert_eq!(labels.get("org"), Some(&"acme".to_string()));
@@ -1241,7 +1194,7 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: Some("application/json".to_string()),
-            schema: None,
+            schema_path: None,
             schema_name: None,
             labels: Vec::new(),
         }];
@@ -1277,7 +1230,7 @@ mod tests {
             ..Default::default()
         };
 
-        let record = mqtt5::build_v5_record(&cfg, &publish, &MqttPayloadHandler::new(None));
+        let record = mqtt5::build_v5_record(&cfg, &publish, &PayloadFormatHandler::new(None));
 
         assert_eq!(record.entry_name, "mqtt/telemetry");
         assert_eq!(
@@ -1301,7 +1254,7 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
-            schema: None,
+            schema_path: None,
             schema_name: None,
             labels: Vec::new(),
         }];
@@ -1313,7 +1266,7 @@ mod tests {
             ..Default::default()
         };
 
-        let record = mqtt5::build_v5_record(&cfg, &publish, &MqttPayloadHandler::new(None));
+        let record = mqtt5::build_v5_record(&cfg, &publish, &PayloadFormatHandler::new(None));
 
         assert_eq!(record.content_type, Some("application/json".to_string()));
     }
