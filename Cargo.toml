@@ -28,7 +28,7 @@ async-trait = "0.1.89"
 toml = "1.0.3"
 serde = { version = "1.0.228", features = ["derive"] }
 bytes = "1.11.1"
-reduct-rs = {  version = "1.19.1" }
+reduct-rs = { version = "1.19.1" }
 anyhow = "1.0.102"
 log = "0.4.28"
 env_logger = "0.11.8"
@@ -41,6 +41,7 @@ ros2_message = { git = "https://github.com/reductstore/ros2_message", optional =
 systemstat = { version = "0.2.6", optional = true }
 rumqttc = { version = "0.25.1", optional = true }
 rustls = { version = "0.23.37", optional = true, features = ["ring"] }
+bytesize = { version = "2", features = ["serde"] }
 
 [dev-dependencies]
 rstest = "0.25.0"

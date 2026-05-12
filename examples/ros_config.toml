@@ -21,7 +21,7 @@ batch_max_interval_ms = 1000
 # Omit this table to require the bucket to exist before starting reduct-bridge.
 # [remotes.reduct.create_bucket]
 # quota_type = "FIFO" # NONE, FIFO, or HARD
-# quota_size = 1073741824 # bytes
+# quota_size = "1GB"
 
 
 # ROS1 input configuration.

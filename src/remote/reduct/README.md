@@ -40,8 +40,8 @@ batch_max_interval_ms = 1000
 # Required when create_bucket is configured: NONE, FIFO, or HARD.
 quota_type = "FIFO"
 
-# Required when create_bucket is configured: quota size in bytes.
-quota_size = 1073741824
+# Required when create_bucket is configured: quota size as bytes or a unit string.
+quota_size = "1GB"
 ```
 
 ## Runtime Notes

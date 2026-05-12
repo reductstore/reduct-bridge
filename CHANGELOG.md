@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Optional ReductStore bucket creation with quota settings via `[remotes.reduct.create_bucket]`.
+- Optional ReductStore bucket creation with quota settings via `[remotes.reduct.create_bucket]`, including human-readable `quota_size` values like `"1GB"`.
 
 ## 0.2.0 - 2026-05-11
 

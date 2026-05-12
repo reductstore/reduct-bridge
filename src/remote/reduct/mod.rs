@@ -18,6 +18,7 @@ use crate::message::{Message, Record};
 use crate::remote::RemoteInstanceLauncher;
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, anyhow, bail};
+use bytesize::ByteSize;
 use log::{debug, info, warn};
 use reduct_rs::{
     Bucket, ErrorCode, QuotaType, RecordBuilder, ReductClient, WriteRecordBatchBuilder,
@@ -51,7 +52,7 @@ pub struct RemoteConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateBucketConfig {
     pub quota_type: QuotaType,
-    pub quota_size: u64,
+    pub quota_size: ByteSize,
 }
 
 pub struct ReductInstance {
@@ -95,7 +96,7 @@ impl ReductInstance {
                 client
                     .create_bucket(&cfg.bucket)
                     .quota_type(create_bucket.quota_type.clone())
-                    .quota_size(create_bucket.quota_size)
+                    .quota_size(create_bucket.quota_size.as_u64())
                     .exist_ok(true)
                     .send()
                     .await
@@ -205,7 +206,7 @@ impl RemoteInstanceLauncher for ReductInstance {
             bail!("Reduct remote batch_max_interval_ms must be greater than 0");
         }
         if let Some(create_bucket) = &cfg.create_bucket {
-            if create_bucket.quota_size == 0 {
+            if create_bucket.quota_size.as_u64() == 0 {
                 bail!("Reduct remote create_bucket.quota_size must be greater than 0");
             }
         }
@@ -280,6 +281,7 @@ impl RemoteInstanceLauncher for ReductInstance {
 mod config_tests {
     use super::RemoteConfig;
     use crate::cfg::{find_named_entry, parse_entry};
+    use bytesize::ByteSize;
     use reduct_rs::QuotaType;
     use toml::Value;
 
@@ -310,7 +312,29 @@ quota_size = 1073741824
 
         let create_bucket = cfg.create_bucket.expect("create_bucket config");
         assert_eq!(create_bucket.quota_type, QuotaType::FIFO);
-        assert_eq!(create_bucket.quota_size, 1073741824);
+        assert_eq!(create_bucket.quota_size, ByteSize(1073741824));
+    }
+
+    #[test]
+    fn parses_create_bucket_config_with_size_units_from_toml() {
+        let cfg = parse_reduct_remote(
+            r#"
+[[remotes.reduct]]
+name = "local"
+url = "http://localhost:8383"
+token_api = ""
+bucket = "my-bucket"
+prefix = ""
+
+[remotes.reduct.create_bucket]
+quota_type = "FIFO"
+quota_size = "1GB"
+"#,
+        );
+
+        let create_bucket = cfg.create_bucket.expect("create_bucket config");
+        assert_eq!(create_bucket.quota_type, QuotaType::FIFO);
+        assert_eq!(create_bucket.quota_size.as_u64(), 1_000_000_000);
     }
 
     #[test]
@@ -356,6 +380,7 @@ mod ci_tests {
     use crate::message::{Message, Record};
     use crate::remote::RemoteInstanceLauncher;
     use bytes::Bytes;
+    use bytesize::ByteSize;
     use futures_util::StreamExt;
     use reduct_rs::{QuotaType, ReductClient};
     use rstest::{fixture, rstest};
@@ -476,7 +501,7 @@ mod ci_tests {
             bucket_name.clone(),
             Some(CreateBucketConfig {
                 quota_type: QuotaType::FIFO,
-                quota_size: 1024 * 1024 * 1024,
+                quota_size: ByteSize(1024 * 1024 * 1024),
             }),
         ));
 
@@ -514,7 +539,7 @@ mod ci_tests {
             bucket_name.clone(),
             Some(CreateBucketConfig {
                 quota_type: QuotaType::FIFO,
-                quota_size: 1024 * 1024 * 1024,
+                quota_size: ByteSize(1024 * 1024 * 1024),
             }),
         ));
 
