@@ -30,9 +30,10 @@ runs:
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
 
-    - name: Run Docker-backed ReductStore test (CI feature)
+    - name: Run ReductStore integration test (CI feature)
       shell: bash
       env:
+        REDUCTSTORE_URL: http://127.0.0.1:8383
         CARGO_TERM_COLOR: always
         RUST_LOG: debug
       run: |
@@ -42,11 +43,12 @@ runs:
           source "${{ inputs.ros-setup-script }}"
           set -u
         fi
-        cargo test ${{ inputs.cargo-args }} docker_reductstore_roundtrip_data_and_attachment -- --nocapture
+        cargo test ${{ inputs.cargo-args }} ci_reductstore_roundtrip_data_and_attachment -- --nocapture
 
     - name: Run code coverage
       shell: bash
       env:
+        REDUCTSTORE_URL: http://127.0.0.1:8383
         CARGO_TERM_COLOR: always
         RUST_LOG: debug
       run: |

@@ -11,14 +11,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 #[cfg(any(feature = "ros1", feature = "ros2"))]
 use crate::message::Attachment;
 use crate::message::{Message, Record};
 use crate::remote::RemoteInstanceLauncher;
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, anyhow, bail};
+use bytesize::ByteSize;
 use log::{debug, info, warn};
-use reduct_rs::{Bucket, RecordBuilder, ReductClient, WriteRecordBatchBuilder};
+use reduct_rs::{
+    Bucket, ErrorCode, QuotaType, RecordBuilder, ReductClient, WriteRecordBatchBuilder,
+};
 use serde::Deserialize;
 use tokio::sync::mpsc::channel;
 use tokio::time::{Duration, MissedTickBehavior, interval};
@@ -40,6 +44,15 @@ pub struct RemoteConfig {
     pub batch_max_size_bytes: usize,
     #[serde(default = "default_batch_max_interval_ms")]
     pub batch_max_interval_ms: u64,
+
+    #[serde(default)]
+    pub create_bucket: Option<CreateBucketConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateBucketConfig {
+    pub quota_type: QuotaType,
+    pub quota_size: ByteSize,
 }
 
 pub struct ReductInstance {
@@ -61,6 +74,37 @@ fn default_batch_max_size_bytes() -> usize {
 impl ReductInstance {
     pub fn new(cfg: RemoteConfig) -> Self {
         Self { cfg }
+    }
+
+    async fn resolve_bucket(client: &ReductClient, cfg: &RemoteConfig) -> Result<Bucket, Error> {
+        match client.get_bucket(&cfg.bucket).await {
+            Ok(bucket) => Ok(bucket),
+
+            Err(err) if err.status() == ErrorCode::NotFound => {
+                let Some(create_bucket) = &cfg.create_bucket else {
+                    bail!(
+                        "Failed to access bucket '{}': bucket does not exist. Configure [remotes.reduct.create_bucket] to create it automatically.",
+                        cfg.bucket
+                    );
+                };
+
+                info!(
+                    "Bucket '{}' does not exist, creating it with quota type {:?} and quota size {} bytes",
+                    cfg.bucket, create_bucket.quota_type, create_bucket.quota_size
+                );
+
+                client
+                    .create_bucket(&cfg.bucket)
+                    .quota_type(create_bucket.quota_type.clone())
+                    .quota_size(create_bucket.quota_size.as_u64())
+                    .exist_ok(true)
+                    .send()
+                    .await
+                    .map_err(|err| anyhow!("Failed to create bucket '{}': {}", cfg.bucket, err))
+            }
+
+            Err(err) => Err(anyhow!("Failed to access bucket '{}': {}", cfg.bucket, err)),
+        }
     }
 
     fn normalize_entry_path(prefix: &str, entry_name: &str) -> Option<String> {
@@ -161,18 +205,19 @@ impl RemoteInstanceLauncher for ReductInstance {
         if cfg.batch_max_interval_ms == 0 {
             bail!("Reduct remote batch_max_interval_ms must be greater than 0");
         }
+        if let Some(create_bucket) = &cfg.create_bucket {
+            if create_bucket.quota_size.as_u64() == 0 {
+                bail!("Reduct remote create_bucket.quota_size must be greater than 0");
+            }
+        }
 
         let client = ReductClient::builder()
             .url(&cfg.url)
             .api_token(&cfg.token_api)
             .try_build()
             .map_err(|err| anyhow!("Failed to build Reduct client for '{}': {}", cfg.url, err))?;
-        let bucket = client
-            .get_bucket(&cfg.bucket)
-            .await
-            .map_err(|err| anyhow!("Failed to access bucket '{}': {}", cfg.bucket, err))?;
-
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
+        let bucket: Bucket = Self::resolve_bucket(&client, &cfg).await?;
         info!(
             "Launching Reduct remote '{}' bucket '{}' prefix '{}' batch >{} records, >{} bytes, every {}ms",
             cfg.url,
@@ -232,28 +277,123 @@ impl RemoteInstanceLauncher for ReductInstance {
     }
 }
 
+#[cfg(test)]
+mod config_tests {
+    use super::RemoteConfig;
+    use crate::cfg::{find_named_entry, parse_entry};
+    use bytesize::ByteSize;
+    use reduct_rs::QuotaType;
+    use rstest::rstest;
+    use toml::Value;
+
+    fn parse_reduct_remote_config(config_text: &str) -> anyhow::Result<RemoteConfig> {
+        let config: Value = toml::from_str(config_text).expect("parse toml");
+        let (remote_type, remote_table) =
+            find_named_entry(&config, "remotes", "local").expect("find remote");
+        assert_eq!(remote_type, "reduct");
+        parse_entry(remote_table)
+    }
+
+    fn build_remote_config(create_bucket: &str) -> String {
+        format!(
+            r#"
+[[remotes.reduct]]
+name = "local"
+url = "http://localhost:8383"
+token_api = ""
+bucket = "my-bucket"
+prefix = ""
+{create_bucket}
+"#
+        )
+    }
+
+    #[rstest]
+    #[case("1073741824", ByteSize(1073741824))]
+    #[case("\"1GB\"", ByteSize(1_000_000_000))]
+    #[case("\"4GiB\"", ByteSize(4 * 1024 * 1024 * 1024))]
+    fn parses_create_bucket_config_from_toml(
+        #[case] quota_size: &str,
+        #[case] expected_size: ByteSize,
+    ) {
+        let cfg = parse_reduct_remote_config(&build_remote_config(&format!(
+            r#"
+
+[remotes.reduct.create_bucket]
+quota_type = "FIFO"
+quota_size = {quota_size}
+"#
+        )))
+        .expect("parse remote config");
+
+        let create_bucket = cfg.create_bucket.expect("create_bucket config");
+        assert_eq!(create_bucket.quota_type, QuotaType::FIFO);
+        assert_eq!(create_bucket.quota_size, expected_size);
+    }
+
+    #[rstest]
+    #[case("\"10XB\"")]
+    #[case("\"abc\"")]
+    fn rejects_create_bucket_config_with_invalid_size_unit(#[case] quota_size: &str) {
+        let err = parse_reduct_remote_config(&build_remote_config(&format!(
+            r#"
+
+[remotes.reduct.create_bucket]
+quota_type = "FIFO"
+quota_size = {quota_size}
+"#
+        )))
+        .expect_err("invalid quota_size should fail");
+
+        let message = err.to_string();
+        assert!(message.contains("Failed to deserialize section entry"));
+    }
+
+    #[test]
+    fn omits_create_bucket_config_by_default() {
+        let cfg =
+            parse_reduct_remote_config(&build_remote_config("")).expect("parse remote config");
+
+        assert!(cfg.create_bucket.is_none());
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::ReductInstance;
+
+    #[test]
+    fn normalize_entry_path_collapses_extra_slashes() {
+        assert_eq!(
+            ReductInstance::normalize_entry_path("ros_data/", "/tf"),
+            Some("ros_data/tf".to_string())
+        );
+        assert_eq!(
+            ReductInstance::normalize_entry_path("/root//", "//a//b/"),
+            Some("root/a/b".to_string())
+        );
+        assert_eq!(ReductInstance::normalize_entry_path("/", "//"), None);
+    }
+}
+
 #[cfg(all(test, feature = "ci"))]
-mod tests {
-    use super::{ReductInstance, RemoteConfig};
+mod ci_tests {
+    use super::{CreateBucketConfig, ReductInstance, RemoteConfig};
     #[cfg(any(feature = "ros1", feature = "ros2"))]
     use crate::message::Attachment;
     use crate::message::{Message, Record};
     use crate::remote::RemoteInstanceLauncher;
     use bytes::Bytes;
+    use bytesize::ByteSize;
     use futures_util::StreamExt;
-    use reduct_rs::ReductClient;
+    use reduct_rs::{QuotaType, ReductClient};
     use rstest::{fixture, rstest};
+    #[cfg(any(feature = "ros1", feature = "ros2"))]
     use serde_json::json;
     use std::collections::HashMap;
-    use std::net::TcpListener;
-    use std::process::Command;
+    use std::env;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tokio::time::sleep;
-
-    fn free_port() -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind free port");
-        listener.local_addr().expect("local addr").port()
-    }
 
     fn unique_suffix() -> String {
         format!(
@@ -266,31 +406,61 @@ mod tests {
         )
     }
 
-    fn run_command(args: &[&str]) -> std::process::Output {
-        Command::new(args[0])
-            .args(&args[1..])
-            .output()
-            .expect("run command")
+    fn reductstore_url() -> String {
+        env::var("REDUCTSTORE_URL").unwrap_or_else(|_| "http://127.0.0.1:8383".to_string())
     }
 
-    struct DockerGuard {
-        container: String,
-    }
-
-    impl Drop for DockerGuard {
-        fn drop(&mut self) {
-            if std::thread::panicking() {
-                let logs = run_command(&["docker", "logs", &self.container]);
-                eprintln!("=== ReductStore logs ({}) ===", self.container);
-                if !logs.stdout.is_empty() {
-                    eprintln!("{}", String::from_utf8_lossy(&logs.stdout));
-                }
-                if !logs.stderr.is_empty() {
-                    eprintln!("{}", String::from_utf8_lossy(&logs.stderr));
-                }
+    async fn reductstore_client() -> ReductClient {
+        let url = reductstore_url();
+        let client = ReductClient::builder().url(&url).api_token("").build();
+        let mut alive = false;
+        for _ in 0..40 {
+            if client.alive().await.is_ok() {
+                alive = true;
+                break;
             }
-            let _ = run_command(&["docker", "rm", "-f", &self.container]);
+            sleep(Duration::from_millis(250)).await;
         }
+        assert!(alive, "ReductStore did not become alive at {url}");
+        sleep(Duration::from_secs(2)).await;
+
+        client
+    }
+
+    fn remote_config(
+        url: String,
+        bucket: String,
+        create_bucket: Option<CreateBucketConfig>,
+    ) -> RemoteConfig {
+        RemoteConfig {
+            url,
+            token_api: "".to_string(),
+            bucket,
+            prefix: "it/".to_string(),
+            batch_max_records: 10,
+            batch_max_size_bytes: 1024 * 1024,
+            batch_max_interval_ms: 50,
+            create_bucket,
+        }
+    }
+
+    async fn write_data_and_stop(remote: ReductInstance, message: Message) {
+        let runtime = remote.launch().await.expect("launch remote");
+        runtime.tx.send(message).await.expect("send data");
+        runtime.tx.send(Message::Stop).await.expect("send stop");
+        runtime.task.await.expect("join remote");
+    }
+
+    async fn assert_data_record(client: &ReductClient, bucket_name: &str) {
+        let bucket = client.get_bucket(bucket_name).await.expect("get bucket");
+        let mut query = bucket.query("it/entry").send().await.expect("query");
+        let rec = query.next().await.expect("record").expect("query result");
+        assert_eq!(rec.content_type(), "text/plain");
+        assert_eq!(rec.labels().get("l").map(String::as_str), Some("1"));
+        assert_eq!(
+            rec.bytes().await.expect("record bytes"),
+            Bytes::from("hello")
+        );
     }
 
     #[fixture]
@@ -322,64 +492,105 @@ mod tests {
         })
     }
 
-    #[test]
-    fn normalize_entry_path_collapses_extra_slashes() {
-        assert_eq!(
-            ReductInstance::normalize_entry_path("ros_data/", "/tf"),
-            Some("ros_data/tf".to_string())
+    #[rstest]
+    #[tokio::test]
+    async fn ci_reductstore_creates_missing_bucket(data_message: Message) {
+        let suffix = unique_suffix();
+        let bucket_name = format!("it-{suffix}");
+        let url = reductstore_url();
+        let client = reductstore_client().await;
+
+        let remote = ReductInstance::new(remote_config(
+            url,
+            bucket_name.clone(),
+            Some(CreateBucketConfig {
+                quota_type: QuotaType::FIFO,
+                quota_size: ByteSize(1024 * 1024 * 1024),
+            }),
+        ));
+
+        write_data_and_stop(remote, data_message).await;
+
+        assert_data_record(&client, &bucket_name).await;
+        let settings = client
+            .get_bucket(&bucket_name)
+            .await
+            .expect("get bucket")
+            .settings()
+            .await
+            .expect("bucket settings");
+        assert_eq!(settings.quota_type, Some(QuotaType::FIFO));
+        assert_eq!(settings.quota_size, Some(1024 * 1024 * 1024));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn ci_reductstore_existing_bucket_is_not_modified(data_message: Message) {
+        let suffix = unique_suffix();
+        let bucket_name = format!("it-{suffix}");
+        let url = reductstore_url();
+        let client = reductstore_client().await;
+        client
+            .create_bucket(&bucket_name)
+            .quota_type(QuotaType::HARD)
+            .quota_size(2 * 1024 * 1024 * 1024)
+            .send()
+            .await
+            .expect("create bucket");
+
+        let remote = ReductInstance::new(remote_config(
+            url,
+            bucket_name.clone(),
+            Some(CreateBucketConfig {
+                quota_type: QuotaType::FIFO,
+                quota_size: ByteSize(1024 * 1024 * 1024),
+            }),
+        ));
+
+        write_data_and_stop(remote, data_message).await;
+
+        assert_data_record(&client, &bucket_name).await;
+        let settings = client
+            .get_bucket(&bucket_name)
+            .await
+            .expect("get bucket")
+            .settings()
+            .await
+            .expect("bucket settings");
+        assert_eq!(settings.quota_type, Some(QuotaType::HARD));
+        assert_eq!(settings.quota_size, Some(2 * 1024 * 1024 * 1024));
+    }
+
+    #[tokio::test]
+    async fn ci_reductstore_missing_bucket_without_create_config_fails() {
+        let suffix = unique_suffix();
+        let bucket_name = format!("it-{suffix}");
+        let url = reductstore_url();
+        let _client = reductstore_client().await;
+
+        let remote = ReductInstance::new(remote_config(url, bucket_name, None));
+        let err = remote
+            .launch()
+            .await
+            .expect_err("missing bucket should fail without create config");
+
+        assert!(
+            err.to_string().contains("bucket does not exist"),
+            "unexpected error: {err}"
         );
-        assert_eq!(
-            ReductInstance::normalize_entry_path("/root//", "//a//b/"),
-            Some("root/a/b".to_string())
-        );
-        assert_eq!(ReductInstance::normalize_entry_path("/", "//"), None);
     }
 
     #[rstest]
     #[tokio::test]
     #[cfg(any(feature = "ros1", feature = "ros2"))]
-    async fn docker_reductstore_roundtrip_data_and_attachment(
+    async fn ci_reductstore_roundtrip_data_and_attachment(
         data_message: Message,
         ros_attachment_message: Message,
     ) {
-        let port = free_port();
         let suffix = unique_suffix();
-        let container = format!("reduct-bridge-test-{suffix}");
         let bucket_name = format!("it-{suffix}");
-        let url = format!("http://127.0.0.1:{port}");
-
-        let _guard = DockerGuard {
-            container: container.clone(),
-        };
-
-        let start = run_command(&[
-            "docker",
-            "run",
-            "-d",
-            "--rm",
-            "--name",
-            &container,
-            "-p",
-            &format!("{port}:8383"),
-            "reduct/store:main",
-        ]);
-        assert!(
-            start.status.success(),
-            "failed to start docker: {}",
-            String::from_utf8_lossy(&start.stderr)
-        );
-
-        let client = ReductClient::builder().url(&url).api_token("").build();
-        let mut alive = false;
-        for _ in 0..40 {
-            if client.alive().await.is_ok() {
-                alive = true;
-                break;
-            }
-            sleep(Duration::from_millis(250)).await;
-        }
-        assert!(alive, "ReductStore did not become alive at {url}");
-        sleep(Duration::from_secs(2)).await;
+        let url = reductstore_url();
+        let client = reductstore_client().await;
 
         client
             .create_bucket(&bucket_name)
@@ -388,15 +599,7 @@ mod tests {
             .await
             .expect("create bucket");
 
-        let remote = ReductInstance::new(RemoteConfig {
-            url: url.clone(),
-            token_api: "".to_string(),
-            bucket: bucket_name.clone(),
-            prefix: "it/".to_string(),
-            batch_max_records: 10,
-            batch_max_size_bytes: 1024 * 1024,
-            batch_max_interval_ms: 50,
-        });
+        let remote = ReductInstance::new(remote_config(url, bucket_name.clone(), None));
 
         let runtime = remote.launch().await.expect("launch remote");
         runtime.tx.send(data_message).await.expect("send data");
