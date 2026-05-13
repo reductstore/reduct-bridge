@@ -1,0 +1,51 @@
+services:
+  reductstore:
+    image: reduct/store:main
+    ports:
+      - "8383:8383"
+    environment:
+      RS_BUCKET_A_NAME: proto-test
+      RS_BUCKET_A_QUOTA_TYPE: FIFO
+      RS_BUCKET_A_QUOTA_SIZE: 100MB
+      RS_BUCKET_B_NAME: json-test
+      RS_BUCKET_B_QUOTA_TYPE: FIFO
+      RS_BUCKET_B_QUOTA_SIZE: 100MB
+      RS_BUCKET_C_NAME: proto-nodesc-test
+      RS_BUCKET_C_QUOTA_TYPE: FIFO
+      RS_BUCKET_C_QUOTA_SIZE: 100MB
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf
+
+  publisher:
+    build:
+      context: ./mqtt
+      dockerfile: Dockerfile.proto
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+  publisher-json:
+    build:
+      context: ./mqtt
+      dockerfile: Dockerfile.json
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+  bridge:
+    image: ubuntu:24.04
+    volumes:
+      - ../target/debug/reduct-bridge:/usr/local/bin/reduct-bridge:ro
+      - ./mqtt/bridge.toml:/etc/bridge.toml:ro
+      - ./mqtt/factory.desc:/app/factory.desc:ro
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+    command: ["reduct-bridge", "/etc/bridge.toml"]
+    depends_on:
+      - reductstore
+      - mosquitto
+    restart: unless-stopped

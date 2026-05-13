@@ -19,8 +19,17 @@ Supported input types include:
 - [Metrics](src/input/metrics/README.md) - collect host CPU, memory, and disk metrics as JSON records.
 - [MQTT](src/input/mqtt/README.md) - subscribe to MQTT v3/v5 topics over `mqtt://` or `mqtts://` and store raw payloads with optional payload/property label mapping.
 - [Shell](src/input/shell/README.md) - run shell commands on a fixed interval and store output lines as records.
-- [ROS1](src/input/ros1/README.md) - subscribe to ROS1 topics and store ROS messages as records.
-- [ROS2](src/input/ros2/README.md) - subscribe to ROS2 topics and store serialized CDR payloads as records.
+- [ROS1](src/input/ros1/README.md) - subscribe to ROS1 topics, store ROS messages, and extract labels from message fields.
+- [ROS2](src/input/ros2/README.md) - subscribe to ROS2 topics, store serialized CDR payloads, and extract labels from decoded message fields.
+
+## Formats
+
+ReductBridge supports different payload formats.
+Support means ReductBridge can parse payloads, extract labels, and, when schema information is available, store that schema in ReductStore.
+
+- JSON: find values by field path (example: [examples/mqtt_config.toml](examples/mqtt_config.toml)).
+- Protobuf: find values by field path (with schema) or by field ID/type (example: [examples/mqtt_protobuf_config.toml](examples/mqtt_protobuf_config.toml)).
+- ROS formats: decode ROS message payloads for labels and store the payloads as records (example: [examples/ros_config.toml](examples/ros_config.toml)).
 
 ## Remotes
 

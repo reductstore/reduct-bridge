@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use bytes::Bytes;
-#[cfg(any(feature = "ros1", feature = "ros2"))]
+#[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -26,7 +26,7 @@ pub struct Record {
 }
 
 #[derive(Debug, Clone)]
-#[cfg(any(feature = "ros1", feature = "ros2"))]
+#[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
 pub struct Attachment {
     pub entry_name: String,
     pub key: String,
@@ -36,7 +36,7 @@ pub struct Attachment {
 #[derive(Debug, Clone)]
 pub enum Message {
     Data(Record),
-    #[cfg(any(feature = "ros1", feature = "ros2"))]
+    #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
     Attachment(Attachment),
     Stop,
 }

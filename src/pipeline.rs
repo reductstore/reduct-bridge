@@ -241,7 +241,7 @@ impl PipelineLauncher for PassthroughPipelineLauncher {
                             );
                         }
                     }
-                    #[cfg(any(feature = "ros1", feature = "ros2"))]
+                    #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
                     Message::Attachment(attachment) => {
                         if let Err(err) = remote_tx.send(Message::Attachment(attachment)).await {
                             warn!(

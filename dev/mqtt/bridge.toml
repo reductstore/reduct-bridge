@@ -1,0 +1,169 @@
+# =============================================================================
+# REMOTES: destination buckets in ReductStore
+# Each remote defines a target bucket. Multiple remotes allow pipelines to
+# write to different buckets so we can compare approaches side-by-side.
+# =============================================================================
+
+[[remotes.reduct]]
+name = "local"
+url = "http://reductstore:8383"
+token_api = ""
+bucket = "proto-test"
+prefix = ""
+
+[[remotes.reduct]]
+name = "local-json"
+url = "http://reductstore:8383"
+token_api = ""
+bucket = "json-test"
+prefix = ""
+
+[[remotes.reduct]]
+name = "local-proto-nodesc"
+url = "http://reductstore:8383"
+token_api = ""
+bucket = "proto-nodesc-test"
+prefix = ""
+
+# =============================================================================
+# INPUT: Protobuf WITH schema file (labels by field NAME)
+# The schema_path + schema_name let the bridge decode the binary payload
+# into JSON, then extract labels by field name (just like JSON payloads).
+# Also attaches the .desc file in `$schema` JSON so consumers can decode later.
+# =============================================================================
+
+[inputs.mqtt.main]
+broker = "mqtt://mosquitto:1883"
+client_id = "bridge-dev"
+version = "v5"
+qos = 0
+entry_prefix = ""
+
+[[inputs.mqtt.main.topics]]
+name = "factory/+/environment"
+content_type = "application/protobuf"
+schema_path = "/app/factory.desc"
+schema_name = "factory.EnvironmentReading"
+
+[[inputs.mqtt.main.topics.labels]]
+field = "device_id"
+label = "sensor_id"
+
+[[inputs.mqtt.main.topics.labels]]
+field = "line"
+label = "line"
+
+[[inputs.mqtt.main.topics]]
+name = "factory/machines/+/vibration/+"
+content_type = "application/protobuf"
+schema_path = "/app/factory.desc"
+schema_name = "factory.VibrationSpectrum"
+
+[[inputs.mqtt.main.topics.labels]]
+field = "device_id"
+label = "machine_id"
+
+[[inputs.mqtt.main.topics.labels]]
+field = "machine"
+label = "machine"
+
+[[inputs.mqtt.main.topics]]
+name = "factory/electrical/+/power"
+content_type = "application/protobuf"
+schema_path = "/app/factory.desc"
+schema_name = "factory.PowerReading"
+
+[[inputs.mqtt.main.topics.labels]]
+field = "device_id"
+label = "meter_id"
+
+[[inputs.mqtt.main.topics.labels]]
+field = "panel"
+label = "panel"
+
+# =============================================================================
+# INPUT: Protobuf WITHOUT schema file (labels by field ID)
+# No schema_path/schema_name means the bridge extracts labels directly
+# from wire bytes using field_id + field_type.
+# =============================================================================
+
+[inputs.mqtt.proto_no_desc]
+broker = "mqtt://mosquitto:1883"
+client_id = "bridge-proto-nodesc"
+version = "v5"
+qos = 0
+entry_prefix = ""
+
+[[inputs.mqtt.proto_no_desc.topics]]
+name = "factory/+/environment"
+content_type = "application/protobuf"
+
+[[inputs.mqtt.proto_no_desc.topics.labels]]
+field_id = 1
+field_type = "string"
+label = "sensor_id"
+
+[[inputs.mqtt.proto_no_desc.topics]]
+name = "factory/machines/+/vibration/+"
+content_type = "application/protobuf"
+
+[[inputs.mqtt.proto_no_desc.topics.labels]]
+field_id = 1
+field_type = "string"
+label = "machine_id"
+
+[[inputs.mqtt.proto_no_desc.topics]]
+name = "factory/electrical/+/power"
+content_type = "application/protobuf"
+
+[[inputs.mqtt.proto_no_desc.topics.labels]]
+field_id = 1
+field_type = "string"
+label = "meter_id"
+
+# =============================================================================
+# INPUT: JSON
+# Labels extracted by JSON field name (no protobuf involved).
+# Also demonstrates static labels (hardcoded key=value).
+# =============================================================================
+
+[inputs.mqtt.json_input]
+broker = "mqtt://mosquitto:1883"
+client_id = "bridge-json-dev"
+version = "v5"
+qos = 0
+entry_prefix = ""
+
+[[inputs.mqtt.json_input.topics]]
+name = "json/sensors/+/+"
+content_type = "application/json"
+
+[[inputs.mqtt.json_input.topics.labels]]
+field = "sensor_id"
+label = "sensor_id"
+
+[[inputs.mqtt.json_input.topics.labels]]
+field = "location"
+label = "location"
+
+[[inputs.mqtt.json_input.topics.labels]]
+[inputs.mqtt.json_input.topics.labels.static]
+source = "json-mqtt"
+
+# =============================================================================
+# PIPELINES: Connect inputs to remotes
+# Each pipeline takes messages from one or more inputs and forwards them
+# to a single remote. This is the routing layer.
+# =============================================================================
+
+[pipelines.main]
+inputs = ["main"]
+remote = "local"
+
+[pipelines.json]
+inputs = ["json_input"]
+remote = "local-json"
+
+[pipelines.proto_no_desc]
+inputs = ["proto_no_desc"]
+remote = "local-proto-nodesc"

@@ -27,3 +27,5 @@ target
 snap/snapcraft.yaml
 *.snap
 testing/
+dev/mqtt/factory_pb2.py
+dev/mqtt/factory.desc

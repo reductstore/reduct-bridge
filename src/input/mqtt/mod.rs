@@ -15,15 +15,20 @@
 mod mqtt3;
 mod mqtt5;
 
-use crate::formats::json::{extract_json_path, value_to_label};
+use crate::formats::{
+    AttachmentContext, DecodeFormat, DecodeSchema, FormatAttachment, FormatHandler,
+    PayloadFormatHandler,
+};
 use crate::input::InputLauncher;
+use crate::message::{Attachment, Message};
 use crate::runtime::ComponentRuntime;
 use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
-use log::info;
+use log::{info, warn};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::Sender;
 
@@ -61,15 +66,40 @@ pub struct MqttTopicConfig {
     #[serde(default)]
     pub content_type: Option<String>,
     #[serde(default)]
+    #[serde(alias = "schema")]
+    pub schema_path: Option<String>,
+    #[serde(default)]
+    pub schema_name: Option<String>,
+    #[serde(default)]
     pub labels: Vec<MqttLabelRule>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum MqttLabelRule {
-    Field { field: String, label: String },
-    Property { property: String, label: String },
-    Static { r#static: HashMap<String, String> },
+    Property {
+        property: String,
+        label: String,
+    },
+    Static {
+        r#static: HashMap<String, String>,
+    },
+    Field {
+        #[serde(default)]
+        field: Option<String>,
+        #[serde(default)]
+        field_id: Option<u32>,
+        #[serde(default)]
+        field_type: Option<String>,
+        label: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PayloadFormat {
+    Json,
+    Protobuf,
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +163,23 @@ impl MqttInstance {
             {
                 bail!("MQTT v3 input does not support property label rules");
             }
+            if topic.schema_path.is_some() != topic.schema_name.is_some() {
+                bail!(
+                    "MQTT topic '{}': schema_path and schema_name must both be set or both omitted",
+                    topic.name
+                );
+            }
+            let payload_format = payload_format_for_topic(topic);
+            Self::validate_topic_payload_format(&topic.name, topic, payload_format)?;
+            for rule in &topic.labels {
+                Self::validate_field_label_rule(&topic.name, rule)?;
+                Self::validate_field_label_compatibility(
+                    &topic.name,
+                    rule,
+                    payload_format,
+                    topic.schema_path.is_some(),
+                )?;
+            }
         }
 
         if cfg.qos > 2 {
@@ -145,6 +192,146 @@ impl MqttInstance {
 
         Ok(())
     }
+
+    fn validate_field_label_rule(topic_name: &str, rule: &MqttLabelRule) -> Result<()> {
+        let MqttLabelRule::Field {
+            field,
+            field_id,
+            field_type,
+            ..
+        } = rule
+        else {
+            return Ok(());
+        };
+
+        if field.as_ref().is_some_and(|f| f.trim().is_empty()) {
+            bail!(
+                "MQTT topic '{}': field label rule 'field' must not be empty",
+                topic_name
+            );
+        }
+        if field_type.as_ref().is_some_and(|t| t.trim().is_empty()) {
+            bail!(
+                "MQTT topic '{}': field label rule 'field_type' must not be empty",
+                topic_name
+            );
+        }
+
+        if field.is_some() {
+            if field_id.is_some() || field_type.is_some() {
+                bail!(
+                    "MQTT topic '{}': field label rule cannot mix 'field' with 'field_id'/'field_type'",
+                    topic_name
+                );
+            }
+            return Ok(());
+        }
+
+        match (field_id, field_type) {
+            (Some(_), Some(_)) => Ok(()),
+            (None, None) => bail!(
+                "MQTT topic '{}': field label rule must define either 'field' or both 'field_id' and 'field_type'",
+                topic_name
+            ),
+            _ => bail!(
+                "MQTT topic '{}': field label rule requires both 'field_id' and 'field_type'",
+                topic_name
+            ),
+        }
+    }
+
+    fn validate_topic_payload_format(
+        topic_name: &str,
+        topic: &MqttTopicConfig,
+        payload_format: PayloadFormat,
+    ) -> Result<()> {
+        if topic.schema_path.is_some() && payload_format != PayloadFormat::Protobuf {
+            bail!(
+                "MQTT topic '{}': schema_path/schema_name require protobuf content_type",
+                topic_name
+            );
+        }
+
+        if payload_format == PayloadFormat::None && topic_uses_decode_labels(topic) {
+            bail!(
+                "MQTT topic '{}': field labels require JSON or protobuf content_type",
+                topic_name
+            );
+        }
+
+        Ok(())
+    }
+
+    fn validate_field_label_compatibility(
+        topic_name: &str,
+        rule: &MqttLabelRule,
+        payload_format: PayloadFormat,
+        has_schema: bool,
+    ) -> Result<()> {
+        let MqttLabelRule::Field {
+            field,
+            field_id,
+            field_type,
+            ..
+        } = rule
+        else {
+            return Ok(());
+        };
+
+        if field.is_some() {
+            match payload_format {
+                PayloadFormat::Json => return Ok(()),
+                PayloadFormat::Protobuf => {
+                    if !has_schema {
+                        bail!(
+                            "MQTT topic '{}': protobuf field-path labels require schema_path/schema_name",
+                            topic_name
+                        );
+                    }
+                    return Ok(());
+                }
+                PayloadFormat::None => {
+                    bail!(
+                        "MQTT topic '{}': field-path labels require JSON or protobuf content_type",
+                        topic_name
+                    );
+                }
+            }
+        }
+
+        if field_id.is_some() || field_type.is_some() {
+            if payload_format != PayloadFormat::Protobuf {
+                bail!(
+                    "MQTT topic '{}': field_id/field_type labels require protobuf content_type",
+                    topic_name
+                );
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn payload_format_for_topic(topic_cfg: &MqttTopicConfig) -> PayloadFormat {
+    let Some(content_type) = topic_cfg.content_type.as_deref() else {
+        return PayloadFormat::None;
+    };
+
+    let ct = content_type.trim().to_ascii_lowercase();
+    if ct.contains("json") {
+        PayloadFormat::Json
+    } else if ct.contains("proto") {
+        PayloadFormat::Protobuf
+    } else {
+        PayloadFormat::None
+    }
+}
+
+fn topic_uses_decode_labels(topic: &MqttTopicConfig) -> bool {
+    topic
+        .labels
+        .iter()
+        .any(|rule| matches!(rule, MqttLabelRule::Field { .. }))
 }
 
 pub(super) fn current_timestamp_us() -> u64 {
@@ -253,45 +440,180 @@ fn parse_broker(broker: &str) -> Result<ParsedBroker> {
     Ok(ParsedBroker { scheme, host, port })
 }
 
-pub(super) fn build_static_labels(rules: &[MqttLabelRule]) -> HashMap<String, String> {
+pub(super) fn build_record_labels(
+    topic_cfg: &MqttTopicConfig,
+    payload: &[u8],
+    property_resolver: Option<&dyn PropertyLabelResolver>,
+    format: &dyn FormatHandler,
+) -> HashMap<String, String> {
     let mut labels = HashMap::new();
-    for rule in rules {
-        if let MqttLabelRule::Static { r#static } = rule {
+
+    let decoded_payload = decode_payload_for_labels(topic_cfg, payload, format);
+
+    for rule in &topic_cfg.labels {
+        apply_label_rule(
+            &mut labels,
+            rule,
+            decoded_payload.as_ref(),
+            payload,
+            property_resolver,
+            format,
+        );
+    }
+
+    labels
+}
+
+pub(super) trait PropertyLabelResolver {
+    fn resolve_property(&self, property_name: &str) -> Option<String>;
+}
+
+fn decode_payload_for_labels(
+    topic_cfg: &MqttTopicConfig,
+    payload: &[u8],
+    format: &dyn FormatHandler,
+) -> Option<Value> {
+    match payload_format_for_topic(topic_cfg) {
+        PayloadFormat::Json => format.decode_payload(payload, DecodeFormat::Json),
+        PayloadFormat::Protobuf => {
+            if let (Some(schema_key), Some(type_name)) = (
+                topic_cfg.schema_path.as_deref(),
+                topic_cfg.schema_name.as_deref(),
+            ) {
+                return format.decode_payload(
+                    payload,
+                    DecodeFormat::Protobuf(DecodeSchema {
+                        key: schema_key,
+                        type_name,
+                    }),
+                );
+            }
+            None
+        }
+        PayloadFormat::None => None,
+    }
+}
+
+fn apply_label_rule(
+    labels: &mut HashMap<String, String>,
+    rule: &MqttLabelRule,
+    decoded_payload: Option<&Value>,
+    raw_payload: &[u8],
+    property_resolver: Option<&dyn PropertyLabelResolver>,
+    format: &dyn FormatHandler,
+) {
+    match rule {
+        MqttLabelRule::Field {
+            field,
+            field_id,
+            field_type,
+            label,
+        } => {
+            if let Some(value) = resolve_field_label(
+                decoded_payload,
+                raw_payload,
+                field.as_deref(),
+                *field_id,
+                field_type.as_deref(),
+                format,
+            ) {
+                labels.insert(label.clone(), value);
+            }
+        }
+        MqttLabelRule::Property { property, label } => {
+            if let Some(value) =
+                property_resolver.and_then(|resolver| resolver.resolve_property(property))
+            {
+                labels.insert(label.clone(), value);
+            }
+        }
+        MqttLabelRule::Static { r#static } => {
             for (key, value) in r#static {
                 labels.insert(key.clone(), value.clone());
             }
         }
     }
-    labels
 }
 
-pub(super) fn build_payload_labels(
-    topic_cfg: &MqttTopicConfig,
-    payload: &[u8],
-    property_labels: HashMap<String, String>,
-) -> HashMap<String, String> {
-    let mut labels = build_static_labels(&topic_cfg.labels);
-    let json = serde_json::from_slice::<Value>(payload).ok();
-
-    for rule in &topic_cfg.labels {
-        match rule {
-            MqttLabelRule::Field { field, label } => {
-                if let Some(json) = &json {
-                    if let Some(value) = extract_json_path(json, field) {
-                        labels.insert(label.clone(), value_to_label(value));
-                    }
-                }
-            }
-            MqttLabelRule::Property { label, .. } => {
-                if let Some(value) = property_labels.get(label) {
-                    labels.insert(label.clone(), value.clone());
-                }
-            }
-            MqttLabelRule::Static { .. } => {}
-        }
+fn resolve_field_label(
+    decoded_payload: Option<&Value>,
+    raw_payload: &[u8],
+    field_path: Option<&str>,
+    field_id: Option<u32>,
+    field_type: Option<&str>,
+    format: &dyn FormatHandler,
+) -> Option<String> {
+    if let (Some(json), Some(path)) = (decoded_payload, field_path) {
+        return format.extract_field_path_value(Some(json), path);
     }
 
-    labels
+    if let (Some(id), Some(value_type)) = (field_id, field_type) {
+        return format.extract_field_value(raw_payload, id, value_type);
+    }
+
+    None
+}
+
+pub(super) async fn emit_attachment(
+    topic_cfg: &MqttTopicConfig,
+    publish_topic: &str,
+    entry_name: &str,
+    format: &dyn FormatHandler,
+    pipeline_tx: &Sender<Message>,
+) -> bool {
+    let schema_key = match &topic_cfg.schema_path {
+        Some(p) => p,
+        None => return true,
+    };
+    let FormatAttachment { key, payload } = match format.build_attachment(AttachmentContext {
+        schema_key,
+        publish_topic: Some(publish_topic),
+        schema_name: topic_cfg.schema_name.as_deref(),
+    }) {
+        Ok(a) => a,
+        Err(err) => {
+            warn!(
+                "Failed to load format attachment for schema path '{}': {}",
+                schema_key, err
+            );
+            return false;
+        }
+    };
+
+    let attachment = Attachment {
+        entry_name: entry_name.to_string(),
+        key,
+        payload,
+    };
+    if let Err(err) = pipeline_tx.send(Message::Attachment(attachment)).await {
+        warn!("Failed to send format attachment: {}", err);
+        return false;
+    }
+
+    true
+}
+
+fn load_payload_handler(cfg: &MqttConfig) -> Result<Arc<PayloadFormatHandler>> {
+    use crate::formats::protobuf::ProtobufHandler;
+
+    let has_format = |fmt| {
+        cfg.topics
+            .iter()
+            .any(|t| payload_format_for_topic(t) == fmt)
+    };
+
+    let protobuf = if has_format(PayloadFormat::Protobuf) {
+        let paths: Vec<String> = cfg
+            .topics
+            .iter()
+            .filter_map(|t| t.schema_path.clone())
+            .collect();
+        Some(ProtobufHandler::load(&paths)?)
+    } else {
+        None
+    };
+
+    Ok(Arc::new(PayloadFormatHandler::new(protobuf)))
 }
 
 pub(super) fn ensure_rustls_crypto_provider() {
@@ -310,6 +632,8 @@ impl InputLauncher for MqttInstance {
         let cfg = self.cfg.clone();
         Self::validate_config(&cfg)?;
 
+        let format = load_payload_handler(&cfg)?;
+
         info!(
             "Launching MQTT input for broker '{}' with {} topic(s) and client '{}'",
             cfg.broker,
@@ -323,12 +647,12 @@ impl InputLauncher for MqttInstance {
             MqttVersion::V3 => {
                 info!("Using MQTT version 3.1.1");
                 let qos = mqtt3::mqtt_qos(cfg.qos)?;
-                mqtt3::launch_v3(cfg, broker, qos, pipeline_tx).await
+                mqtt3::launch_v3(cfg, broker, qos, pipeline_tx, format).await
             }
             MqttVersion::V5 => {
                 info!("Using MQTT version 5.0");
                 let qos = mqtt5::mqtt_v5_qos(cfg.qos)?;
-                mqtt5::launch_v5(cfg, broker, qos, pipeline_tx).await
+                mqtt5::launch_v5(cfg, broker, qos, pipeline_tx, format).await
             }
         }
     }
@@ -338,9 +662,11 @@ impl InputLauncher for MqttInstance {
 mod tests {
     use super::{
         BrokerScheme, MqttConfig, MqttInstance, MqttLabelRule, MqttTopicConfig, MqttVersion,
-        build_payload_labels, entry_name, find_topic_config, mqtt_topic_matches, mqtt3, mqtt5,
+        build_record_labels, entry_name, find_topic_config, mqtt_topic_matches, mqtt3, mqtt5,
         parse_broker, resolve_entry_name,
     };
+    use crate::formats::PayloadFormatHandler;
+    use crate::formats::protobuf::ProtobufHandler;
     use bytes::Bytes;
     use rstest::{fixture, rstest};
     use rumqttc::v5::mqttbytes::v5::{Publish as V5Publish, PublishProperties};
@@ -356,6 +682,8 @@ mod tests {
                 name: "factory/+/telemetry".to_string(),
                 entry_name: None,
                 content_type: None,
+                schema_path: None,
+                schema_name: None,
                 labels: Vec::new(),
             }],
             qos: 1,
@@ -477,12 +805,16 @@ mod tests {
                     name: "factory/+/events".to_string(),
                     entry_name: None,
                     content_type: None,
+                    schema_path: None,
+                    schema_name: None,
                     labels: Vec::new(),
                 },
                 MqttTopicConfig {
                     name: "factory/+/telemetry".to_string(),
                     entry_name: Some("telemetry".to_string()),
                     content_type: Some("application/json".to_string()),
+                    schema_path: None,
+                    schema_name: None,
                     labels: Vec::new(),
                 },
             ],
@@ -501,6 +833,8 @@ mod tests {
             name: "factory/+/telemetry".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: None,
+            schema_path: None,
+            schema_name: None,
             labels: Vec::new(),
         };
 
@@ -577,13 +911,18 @@ mod tests {
 
     #[fixture]
     fn mqtt_cfg_with_payload_labels(mut mqtt_cfg: MqttConfig) -> MqttConfig {
+        mqtt_cfg.topics[0].content_type = Some("application/json".to_string());
         mqtt_cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
-                field: "device_id".to_string(),
+                field: Some("device_id".to_string()),
+                field_id: None,
+                field_type: None,
                 label: "device".to_string(),
             },
             MqttLabelRule::Field {
-                field: "site".to_string(),
+                field: Some("site".to_string()),
+                field_id: None,
+                field_type: None,
                 label: "site".to_string(),
             },
             MqttLabelRule::Static {
@@ -594,11 +933,12 @@ mod tests {
     }
 
     #[rstest]
-    fn builds_payload_labels_from_static_and_json_rules(mqtt_cfg_with_payload_labels: MqttConfig) {
-        let labels = build_payload_labels(
+    fn builds_record_labels_from_static_and_json_rules(mqtt_cfg_with_payload_labels: MqttConfig) {
+        let labels = build_record_labels(
             &mqtt_cfg_with_payload_labels.topics[0],
             br#"{"device_id":"dev-1","site":"lab"}"#,
-            HashMap::new(),
+            None,
+            &PayloadFormatHandler::new(None),
         );
 
         assert_eq!(labels.get("device"), Some(&"dev-1".to_string()));
@@ -607,15 +947,70 @@ mod tests {
     }
 
     #[rstest]
+    fn applies_all_label_rules_in_toml_order(mut mqtt_cfg: MqttConfig) {
+        mqtt_cfg.topics[0].content_type = Some("application/json".to_string());
+        mqtt_cfg.topics[0].labels = vec![
+            MqttLabelRule::Field {
+                field: Some("device_id".to_string()),
+                field_id: None,
+                field_type: None,
+                label: "source".to_string(),
+            },
+            MqttLabelRule::Static {
+                r#static: HashMap::from([("source".to_string(), "mqtt-static".to_string())]),
+            },
+        ];
+
+        let labels = build_record_labels(
+            &mqtt_cfg.topics[0],
+            br#"{"device_id":"dev-1"}"#,
+            None,
+            &PayloadFormatHandler::new(None),
+        );
+
+        assert_eq!(labels.get("source"), Some(&"mqtt-static".to_string()));
+    }
+
+    #[rstest]
     fn skips_json_labels_when_payload_is_not_json(mqtt_cfg_with_payload_labels: MqttConfig) {
-        let labels = build_payload_labels(
+        let labels = build_record_labels(
             &mqtt_cfg_with_payload_labels.topics[0],
             b"plain text payload",
-            HashMap::new(),
+            None,
+            &PayloadFormatHandler::new(None),
         );
 
         assert_eq!(labels.get("device"), None);
         assert_eq!(labels.get("source"), Some(&"mqtt".to_string()));
+    }
+
+    #[rstest]
+    fn builds_record_labels_from_proto_wire_field_without_descriptor(mut mqtt_cfg: MqttConfig) {
+        mqtt_cfg.topics[0].content_type = Some("application/protobuf".to_string());
+        mqtt_cfg.topics[0].labels = vec![
+            MqttLabelRule::Field {
+                field: None,
+                field_id: Some(1),
+                field_type: Some("string".to_string()),
+                label: "sensor_id".to_string(),
+            },
+            MqttLabelRule::Static {
+                r#static: HashMap::from([("source".to_string(), "proto-wire".to_string())]),
+            },
+        ];
+
+        // Field 1 (wire type 2) = "dev-1"
+        let payload = b"\x0a\x05dev-1";
+        let labels = build_record_labels(
+            &mqtt_cfg.topics[0],
+            payload,
+            None,
+            &PayloadFormatHandler::new(Some(ProtobufHandler::load(&[]).unwrap())),
+        );
+
+        assert_eq!(labels.get("sensor_id"), Some(&"dev-1".to_string()));
+        assert_eq!(labels.get("source"), Some(&"proto-wire".to_string()));
+        assert_eq!(labels.get("schema_name"), None);
     }
 
     #[test]
@@ -625,12 +1020,16 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
+            schema_path: None,
+            schema_name: None,
             labels: Vec::new(),
         }];
         cfg.entry_prefix = "/mqtt".to_string();
         cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
-                field: "device_id".to_string(),
+                field: Some("device_id".to_string()),
+                field_id: None,
+                field_type: None,
                 label: "device".to_string(),
             },
             MqttLabelRule::Static {
@@ -647,7 +1046,7 @@ mod tests {
             payload: Bytes::from_static(br#"{"device_id":"dev-1"}"#),
         };
 
-        let record = mqtt3::build_v3_record(&cfg, &publish);
+        let record = mqtt3::build_v3_record(&cfg, &publish, &PayloadFormatHandler::new(None));
 
         assert_eq!(record.entry_name, "mqtt/factory/device-1");
         assert_eq!(
@@ -660,7 +1059,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_v5_property_labels_from_known_properties() {
+    fn resolves_v5_property_labels_with_property_resolver() {
         let mut cfg = mqtt_cfg();
         cfg.topics[0].labels = vec![
             MqttLabelRule::Property {
@@ -684,10 +1083,108 @@ mod tests {
             ..Default::default()
         };
 
-        let labels = mqtt5::build_v5_property_labels(&cfg.topics[0], &publish);
+        let resolver = mqtt5::V5PropertyResolver::new(&publish);
+        let labels = build_record_labels(
+            &cfg.topics[0],
+            publish.payload.as_ref(),
+            Some(&resolver),
+            &PayloadFormatHandler::new(None),
+        );
 
         assert_eq!(labels.get("mime"), Some(&"application/json".to_string()));
         assert_eq!(labels.get("tenant"), Some(&"acme".to_string()));
+    }
+
+    #[test]
+    fn resolver_returns_no_labels_when_v5_publish_has_no_properties() {
+        let mut cfg = mqtt_cfg();
+        cfg.topics[0].labels = vec![
+            MqttLabelRule::Property {
+                property: "content_type".to_string(),
+                label: "mime".to_string(),
+            },
+            MqttLabelRule::Property {
+                property: "tenant".to_string(),
+                label: "tenant".to_string(),
+            },
+        ];
+
+        let publish = V5Publish {
+            topic: Bytes::from_static(b"test/topic"),
+            payload: Bytes::from_static(b"{}"),
+            properties: None,
+            ..Default::default()
+        };
+
+        let resolver = mqtt5::V5PropertyResolver::new(&publish);
+        let labels = build_record_labels(
+            &cfg.topics[0],
+            publish.payload.as_ref(),
+            Some(&resolver),
+            &PayloadFormatHandler::new(None),
+        );
+
+        assert_eq!(labels.get("mime"), None);
+        assert_eq!(labels.get("tenant"), None);
+    }
+
+    #[test]
+    fn resolver_ignores_unknown_v5_property_keys() {
+        let mut cfg = mqtt_cfg();
+        cfg.topics[0].labels = vec![MqttLabelRule::Property {
+            property: "device_group".to_string(),
+            label: "group".to_string(),
+        }];
+
+        let publish = V5Publish {
+            topic: Bytes::from_static(b"test/topic"),
+            payload: Bytes::from_static(b"{}"),
+            properties: Some(PublishProperties {
+                user_properties: vec![("tenant".to_string(), "acme".to_string())],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let resolver = mqtt5::V5PropertyResolver::new(&publish);
+        let labels = build_record_labels(
+            &cfg.topics[0],
+            publish.payload.as_ref(),
+            Some(&resolver),
+            &PayloadFormatHandler::new(None),
+        );
+
+        assert_eq!(labels.get("group"), None);
+    }
+
+    #[test]
+    fn resolver_maps_v5_user_property_to_different_label_name() {
+        let mut cfg = mqtt_cfg();
+        cfg.topics[0].labels = vec![MqttLabelRule::Property {
+            property: "tenant".to_string(),
+            label: "org".to_string(),
+        }];
+
+        let publish = V5Publish {
+            topic: Bytes::from_static(b"test/topic"),
+            payload: Bytes::from_static(b"{}"),
+            properties: Some(PublishProperties {
+                user_properties: vec![("tenant".to_string(), "acme".to_string())],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let resolver = mqtt5::V5PropertyResolver::new(&publish);
+        let labels = build_record_labels(
+            &cfg.topics[0],
+            publish.payload.as_ref(),
+            Some(&resolver),
+            &PayloadFormatHandler::new(None),
+        );
+
+        assert_eq!(labels.get("org"), Some(&"acme".to_string()));
+        assert_eq!(labels.get("tenant"), None);
     }
 
     #[test]
@@ -697,12 +1194,16 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: Some("telemetry".to_string()),
             content_type: Some("application/json".to_string()),
+            schema_path: None,
+            schema_name: None,
             labels: Vec::new(),
         }];
         cfg.entry_prefix = "/mqtt".to_string();
         cfg.topics[0].labels = vec![
             MqttLabelRule::Field {
-                field: "device_id".to_string(),
+                field: Some("device_id".to_string()),
+                field_id: None,
+                field_type: None,
                 label: "device".to_string(),
             },
             MqttLabelRule::Static {
@@ -729,7 +1230,7 @@ mod tests {
             ..Default::default()
         };
 
-        let record = mqtt5::build_v5_record(&cfg, &publish);
+        let record = mqtt5::build_v5_record(&cfg, &publish, &PayloadFormatHandler::new(None));
 
         assert_eq!(record.entry_name, "mqtt/telemetry");
         assert_eq!(
@@ -753,6 +1254,8 @@ mod tests {
             name: "factory/+".to_string(),
             entry_name: None,
             content_type: Some("application/json".to_string()),
+            schema_path: None,
+            schema_name: None,
             labels: Vec::new(),
         }];
 
@@ -763,7 +1266,7 @@ mod tests {
             ..Default::default()
         };
 
-        let record = mqtt5::build_v5_record(&cfg, &publish);
+        let record = mqtt5::build_v5_record(&cfg, &publish, &PayloadFormatHandler::new(None));
 
         assert_eq!(record.content_type, Some("application/json".to_string()));
     }
