@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #[cfg(any(
+    feature = "http",
     feature = "metrics",
     feature = "mqtt",
     feature = "ros1",

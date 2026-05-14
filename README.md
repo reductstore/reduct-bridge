@@ -16,6 +16,7 @@ An `input` is a data source. It reads data from a system and produces records fo
 
 Supported input types include:
 
+- [HTTP](src/input/http/README.md) - poll HTTP/HTTPS endpoints on a fixed interval and store response payloads with optional JSON/header label mapping.
 - [Metrics](src/input/metrics/README.md) - collect host CPU, memory, and disk metrics as JSON records.
 - [MQTT](src/input/mqtt/README.md) - subscribe to MQTT v3/v5 topics over `mqtt://` or `mqtts://` and store raw payloads with optional payload/property label mapping.
 - [Shell](src/input/shell/README.md) - run shell commands on a fixed interval and store output lines as records.
@@ -95,6 +96,7 @@ cargo install reduct-bridge
 ```
 
 `cargo install reduct-bridge` builds the default feature set, which includes only the `shell` input.
+For HTTP-specific build and runtime guidance, see [HTTP input documentation](src/input/http/README.md).
 For MQTT-specific build and runtime guidance, see [MQTT input documentation](src/input/mqtt/README.md).
 The MQTT input is grouped under the `iot` Cargo feature alongside future IoT protocols.
 For metrics-specific build and runtime guidance, see [Metrics input documentation](src/input/metrics/README.md).
@@ -104,7 +106,7 @@ To build additional inputs explicitly from source:
 
 ```bash
 cargo build --no-default-features --features ros1
-cargo build --no-default-features --features shell,metrics,iot
+cargo build --no-default-features --features shell,metrics,http,iot
 cargo build --no-default-features --features all-inputs
 ```
 
