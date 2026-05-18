@@ -497,6 +497,8 @@ jobs:
           build_outputs: type=image,push=true
           base_image: ${{ matrix.base_image }}
           ros_distro: ${{ matrix.ros_distro }}
+          sbom: 'true'
+          provenance: mode=max
 
   snap_release:
     name: Build and Publish Snap Package

@@ -38,6 +38,14 @@ inputs:
     description: 'ROS distro to install (empty for no ROS).'
     required: false
     default: ''
+  sbom:
+    description: 'Generate SBOM attestation.'
+    required: false
+    default: 'false'
+  provenance:
+    description: 'Generate provenance attestation.'
+    required: false
+    default: 'false'
 outputs:
   digest:
     description: 'Image digest from docker/build-push-action.'
@@ -124,6 +132,8 @@ runs:
         build-args: |
           BASE_IMAGE=${{ inputs.base_image }}
           ROS_DISTRO=${{ inputs.ros_distro }}
+        sbom: ${{ inputs.sbom }}
+        provenance: ${{ inputs.provenance }}
 
     - name: Upload artifact
       if: ${{ inputs.upload_artifact == 'true' }}
