@@ -30,6 +30,14 @@ inputs:
     description: 'Upload /tmp/image.tar as artifact.'
     required: false
     default: 'true'
+  base_image:
+    description: 'Base Docker image (e.g., ubuntu:24.04, ubuntu:22.04).'
+    required: false
+    default: 'ubuntu:24.04'
+  ros_distro:
+    description: 'ROS distro to install (empty for no ROS).'
+    required: false
+    default: ''
 outputs:
   digest:
     description: 'Image digest from docker/build-push-action.'
@@ -113,6 +121,9 @@ runs:
         platforms: ${{ inputs.platform }}
         labels: ${{ inputs.docker_labels }}
         outputs: ${{ inputs.build_outputs }}
+        build-args: |
+          BASE_IMAGE=${{ inputs.base_image }}
+          ROS_DISTRO=${{ inputs.ros_distro }}
 
     - name: Upload artifact
       if: ${{ inputs.upload_artifact == 'true' }}
