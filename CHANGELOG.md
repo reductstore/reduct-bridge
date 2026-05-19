@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.2.1 - 2026-05-19
+
 ### Fixed
 
 - Docker image pipeline now builds per variant with Ubuntu base selection, non-root runtime, ROS2 runtime provisioning for ROS variants, corrected DockerHub tagging, and SBOM/provenance attestations, [PR-36](https://github.com/reductstore/reduct-bridge/pull/36)
