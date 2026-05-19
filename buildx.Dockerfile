@@ -12,6 +12,11 @@ FROM ${BASE_IMAGE}
 
 ARG ROS_DISTRO=""
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN if [ -n "$ROS_DISTRO" ]; then \
         apt-get update \
         && apt-get install -y --no-install-recommends \
@@ -25,9 +30,7 @@ RUN if [ -n "$ROS_DISTRO" ]; then \
             ros-${ROS_DISTRO}-ros-core \
         && rm -rf /var/lib/apt/lists/*; \
     else \
-        apt-get update \
-        && apt-get install -y --no-install-recommends ca-certificates \
-        && rm -rf /var/lib/apt/lists/*; \
+        true; \
     fi
 
 ENV ROS_DISTRO=${ROS_DISTRO}
