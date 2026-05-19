@@ -94,12 +94,6 @@ Build only metrics input support:
 cargo build --no-default-features --features metrics
 ```
 
-Build all inputs in one command:
-
-```bash
-cargo build --no-default-features --features all-inputs
-```
-
 ## Runtime Notes
 
 - If `metrics` is empty or omitted, the input collects all supported metrics.
