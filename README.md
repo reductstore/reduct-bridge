@@ -29,6 +29,7 @@ ReductBridge supports different payload formats.
 Support means ReductBridge can parse payloads, extract labels, and, when schema information is available, store that schema in ReductStore.
 
 - JSON: find values by field path (example: [examples/mqtt_config.toml](examples/mqtt_config.toml)).
+- HTTP input: poll HTTP/HTTPS endpoints and extract optional header/JSON labels (example: [examples/http_config.toml](examples/http_config.toml)).
 - Protobuf: find values by field path (with schema) or by field ID/type (example: [examples/mqtt_protobuf_config.toml](examples/mqtt_protobuf_config.toml)).
 - ROS formats: decode ROS message payloads for labels and store the payloads as records (example: [examples/ros_config.toml](examples/ros_config.toml)).
 
