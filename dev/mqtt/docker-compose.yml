@@ -19,11 +19,11 @@ services:
     ports:
       - "1883:1883"
     volumes:
-      - ./mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
 
   publisher:
     build:
-      context: ./mqtt
+      context: .
       dockerfile: Dockerfile.proto
     depends_on:
       - mosquitto
@@ -31,7 +31,7 @@ services:
 
   publisher-json:
     build:
-      context: ./mqtt
+      context: .
       dockerfile: Dockerfile.json
     depends_on:
       - mosquitto
@@ -40,9 +40,9 @@ services:
   bridge:
     image: ubuntu:24.04
     volumes:
-      - ../target/debug/reduct-bridge:/usr/local/bin/reduct-bridge:ro
-      - ./mqtt/bridge.toml:/etc/bridge.toml:ro
-      - ./mqtt/factory.desc:/app/factory.desc:ro
+      - ../../target/debug/reduct-bridge:/usr/local/bin/reduct-bridge:ro
+      - ./bridge.toml:/etc/bridge.toml:ro
+      - ./factory.desc:/app/factory.desc:ro
       - /etc/ssl/certs:/etc/ssl/certs:ro
     command: ["reduct-bridge", "/etc/bridge.toml"]
     depends_on:
