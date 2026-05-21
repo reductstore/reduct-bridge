@@ -1,14 +1,14 @@
 [package]
 name = "reduct-bridge"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 
 [features]
 default = ["shell"]
 all-inputs = ["shell", "ros1", "ros2", "metrics", "http", "iot"]
-ros1 = ["dep:rosrust"]
-ros2 = ["dep:rclrs", "dep:ros2_message"]
+ros1 = ["dep:rosrust", "shell", "metrics"]
+ros2 = ["dep:rclrs", "dep:ros2_message", "shell", "metrics"]
 shell = []
 metrics = ["dep:systemstat"]
 mqtt = [
@@ -16,7 +16,7 @@ mqtt = [
   "dep:rustls",
 ]
 http = ["dep:reqwest"]
-iot = ["mqtt", "http"]
+iot = ["shell", "metrics", "mqtt", "http"]
 ci = []
 
 

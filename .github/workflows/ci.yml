@@ -44,28 +44,28 @@ jobs:
             target: "x86_64-unknown-linux-gnu"
             os: ubuntu-22.04
             compiler: "gcc"
-            cargo_args: "--no-default-features --features shell,ros1"
+            cargo_args: "--no-default-features --features ros1"
             ros_distro: ""
             ros_setup_script: ""
           - artifact_prefix: "bridge-ros2-jazzy"
             target: "x86_64-unknown-linux-gnu"
             os: ubuntu-24.04
             compiler: "gcc"
-            cargo_args: "--no-default-features --features shell,ros2,metrics"
+            cargo_args: "--no-default-features --features ros2"
             ros_distro: "jazzy"
             ros_setup_script: "/opt/ros/jazzy/setup.bash"
           - artifact_prefix: "bridge-ros2-humble"
             target: "x86_64-unknown-linux-gnu"
             os: ubuntu-22.04
             compiler: "gcc"
-            cargo_args: "--no-default-features --features shell,ros2,metrics"
+            cargo_args: "--no-default-features --features ros2"
             ros_distro: "humble"
             ros_setup_script: "/opt/ros/humble/setup.bash"
           - artifact_prefix: "bridge-iot"
             target: "x86_64-unknown-linux-gnu"
             os: ubuntu-24.04
             compiler: "gcc"
-            cargo_args: "--no-default-features --features shell,metrics,iot"
+            cargo_args: "--no-default-features --features iot"
             ros_distro: ""
             ros_setup_script: ""
 
@@ -304,15 +304,23 @@ jobs:
           - image_artifact_name: image-ros1-linux-amd64
             bridge_artifact_name: bridge-ros1-x86_64-unknown-linux-gnu
             image_tag: reduct/bridge:ros1-test
+            base_image: ubuntu:24.04
+            ros_distro: ""
           - image_artifact_name: image-ros2-jazzy-linux-amd64
             bridge_artifact_name: bridge-ros2-jazzy-x86_64-unknown-linux-gnu
             image_tag: reduct/bridge:ros2-jazzy-test
+            base_image: ubuntu:24.04
+            ros_distro: jazzy
           - image_artifact_name: image-ros2-humble-linux-amd64
             bridge_artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
             image_tag: reduct/bridge:ros2-humble-test
+            base_image: ubuntu:22.04
+            ros_distro: humble
           - image_artifact_name: image-iot-linux-amd64
             bridge_artifact_name: bridge-iot-x86_64-unknown-linux-gnu
             image_tag: reduct/bridge:iot-test
+            base_image: ubuntu:24.04
+            ros_distro: ""
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -323,6 +331,8 @@ jobs:
           bridge_artifact_name: ${{ matrix.bridge_artifact_name }}
           image_artifact_name: ${{ matrix.image_artifact_name }}
           image_tag: ${{ matrix.image_tag }}
+          base_image: ${{ matrix.base_image }}
+          ros_distro: ${{ matrix.ros_distro }}
 
   all_tests_passed:
     name: All Tests Passed
@@ -437,21 +447,29 @@ jobs:
             bridge_artifact_name: bridge-ros1-x86_64-unknown-linux-gnu
             image_name: reduct/bridge
             image_suffix: ros1
+            base_image: ubuntu:24.04
+            ros_distro: ""
           - platform: linux/amd64
             cargo_target: x86_64-unknown-linux-gnu
             bridge_artifact_name: bridge-ros2-jazzy-x86_64-unknown-linux-gnu
             image_name: reduct/bridge
             image_suffix: ros2-jazzy
+            base_image: ubuntu:24.04
+            ros_distro: jazzy
           - platform: linux/amd64
             cargo_target: x86_64-unknown-linux-gnu
             bridge_artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
             image_name: reduct/bridge
             image_suffix: ros2-humble
+            base_image: ubuntu:22.04
+            ros_distro: humble
           - platform: linux/amd64
             cargo_target: x86_64-unknown-linux-gnu
             bridge_artifact_name: bridge-iot-x86_64-unknown-linux-gnu
             image_name: reduct/bridge
             image_suffix: iot
+            base_image: ubuntu:24.04
+            ros_distro: ""
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -468,7 +486,9 @@ jobs:
         with:
           images: ${{ matrix.image_name }}
           tags: |
-            type=raw,value=${{ matrix.image_suffix }}-${{ github.ref_name }}
+            type=semver,pattern=v{{version}},suffix=-${{ matrix.image_suffix }}
+            type=raw,value=main-${{ matrix.image_suffix }},enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest-${{ matrix.image_suffix }},enable=${{ github.ref == 'refs/heads/stable' }}
 
       - name: Build and push Docker image to GitHub repo
         id: build
@@ -477,10 +497,14 @@ jobs:
           platform: ${{ matrix.platform }}
           target: ${{ matrix.cargo_target }}
           bridge_artifact_name: ${{ matrix.bridge_artifact_name }}
-          image_tag: ${{ matrix.image_name }}
+          image_tag: ${{ steps.meta.outputs.tags }}
           docker_labels: ${{ steps.meta.outputs.labels }}
           upload_artifact: "false"
-          build_outputs: type=image,name=${{ matrix.image_name }},push=true
+          build_outputs: type=image,push=true
+          base_image: ${{ matrix.base_image }}
+          ros_distro: ${{ matrix.ros_distro }}
+          sbom: 'true'
+          provenance: mode=max
 
   snap_release:
     name: Build and Publish Snap Package

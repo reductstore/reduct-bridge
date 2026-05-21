@@ -70,6 +70,50 @@ labels = [
 
 ## Installation
 
+ReductBridge is published in build types named after Cargo feature bundles: `ros1`, `ros2`, and `iot`.
+Choose the build type for the input family you need.
+
+### Build Types
+
+Published packages and Docker images are split into these build types so each artifact only includes the dependencies needed for its input family.
+
+| Build type | Description | Included inputs | Published artifact names |
+| --- | --- | --- | --- |
+| `ros1` | ROS1 robotics bundle. | [ROS1](src/input/ros1/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-ros1`; Docker build type: `ros1`; binary: `bridge-ros1.x86_64-unknown-linux-gnu.tar.gz` |
+| `ros2` | ROS2 robotics bundle. | [ROS2](src/input/ros2/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-ros2`; Docker build types: `ros2-jazzy`, `ros2-humble`; binaries: `bridge-ros2-jazzy.x86_64-unknown-linux-gnu.tar.gz`, `bridge-ros2-humble.x86_64-unknown-linux-gnu.tar.gz` |
+| `iot` | HTTP/MQTT IIoT bundle. | [HTTP](src/input/http/README.md), [MQTT](src/input/mqtt/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-iot`; Docker build type: `iot`; binary: `bridge-iot.x86_64-unknown-linux-gnu.tar.gz` |
+
+Note: ROS2 binary and Docker artifacts are published per ROS distribution: `ros2-jazzy` and `ros2-humble`. The ROS2 snap is published as `reduct-bridge-ros2` and currently uses the Jazzy build.
+
+Input names in configuration use their input table names, for example `[inputs.ros.*]`, `[inputs.ros2.*]`, `[inputs.mqtt.*]`, `[inputs.shell.*]`, and `[inputs.metrics.*]`.
+
+### Docker
+
+Docker images are published as `reduct/bridge:<tag>`, where `<tag>` combines a release channel or version with the build type.
+For ROS2 Docker images, use the ROS distribution-specific build type: `ros2-jazzy` or `ros2-humble`.
+
+```bash
+docker pull reduct/bridge:main-<build-type>      # development builds from main
+docker pull reduct/bridge:latest-<build-type>    # stable builds
+docker pull reduct/bridge:v<version>-<build-type> # release builds
+```
+
+For example:
+
+```bash
+docker pull reduct/bridge:main-iot
+docker pull reduct/bridge:main-ros2-jazzy
+docker pull reduct/bridge:main-ros2-humble
+```
+
+Run the container with a mounted config file:
+
+```bash
+docker run --rm \
+  -v "$PWD/config.toml:/etc/reduct-bridge/config.toml:ro" \
+  reduct/bridge:main-iot /etc/reduct-bridge/config.toml
+```
+
 ### Snap (Ubuntu 22.04+)
 
 ```bash
@@ -106,7 +150,8 @@ To build additional inputs explicitly from source:
 
 ```bash
 cargo build --no-default-features --features ros1
-cargo build --no-default-features --features shell,metrics,http,iot
+cargo build --no-default-features --features ros2
+cargo build --no-default-features --features iot
 cargo build --no-default-features --features all-inputs
 ```
 
