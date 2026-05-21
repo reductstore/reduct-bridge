@@ -12,15 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(any(
-    feature = "http",
-    feature = "metrics",
-    feature = "mqtt",
-    feature = "ros1",
-    feature = "ros2"
-))]
 pub mod json;
-#[cfg(feature = "mqtt")]
 pub mod protobuf;
 #[cfg(feature = "ros1")]
 pub mod ros1;
@@ -30,7 +22,6 @@ pub mod ros2;
 use anyhow::Result;
 use serde_json::Value;
 
-#[cfg(feature = "mqtt")]
 use anyhow::Context;
 
 #[derive(Clone, Copy)]
@@ -87,13 +78,11 @@ pub trait FormatHandler: Send + Sync {
     fn build_attachment(&self, context: AttachmentContext<'_>) -> Result<FormatAttachment>;
 }
 
-#[cfg(feature = "mqtt")]
 pub(crate) struct PayloadFormatHandler {
     json: crate::formats::json::JsonFormatHandler,
     protobuf: Option<crate::formats::protobuf::ProtobufHandler>,
 }
 
-#[cfg(feature = "mqtt")]
 impl PayloadFormatHandler {
     pub(crate) fn new(protobuf: Option<crate::formats::protobuf::ProtobufHandler>) -> Self {
         Self {
@@ -103,7 +92,6 @@ impl PayloadFormatHandler {
     }
 }
 
-#[cfg(feature = "mqtt")]
 impl FormatHandler for PayloadFormatHandler {
     fn decode_payload(&self, payload: &[u8], format: DecodeFormat<'_>) -> Option<Value> {
         match format {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::formats::json::{extract_json_path, value_to_label};
+use crate::formats::{DecodeFormat, FormatHandler, PayloadFormatHandler};
 use crate::input::InputLauncher;
 use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
@@ -35,8 +35,6 @@ pub struct HttpConfig {
     pub url: String,
     pub repeat_interval: u64,
     pub entry_name: String,
-    #[serde(default)]
-    pub method: HttpMethod,
     #[serde(default)]
     pub content_type: Option<String>,
     #[serde(default)]
@@ -62,33 +60,6 @@ pub enum HttpLabelRule {
     Static { r#static: HashMap<String, String> },
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, Default)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum HttpMethod {
-    #[default]
-    Get,
-    Post,
-    Put,
-    Patch,
-    Delete,
-    Head,
-    Options,
-}
-
-impl HttpMethod {
-    fn as_reqwest_method(self) -> reqwest::Method {
-        match self {
-            Self::Get => reqwest::Method::GET,
-            Self::Post => reqwest::Method::POST,
-            Self::Put => reqwest::Method::PUT,
-            Self::Patch => reqwest::Method::PATCH,
-            Self::Delete => reqwest::Method::DELETE,
-            Self::Head => reqwest::Method::HEAD,
-            Self::Options => reqwest::Method::OPTIONS,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct HttpInstance {
     pub cfg: HttpConfig,
@@ -97,6 +68,12 @@ pub struct HttpInstance {
 impl HttpInstance {
     pub fn new(cfg: HttpConfig) -> Self {
         Self { cfg }
+    }
+
+    fn needs_body_decode(rules: &[HttpLabelRule]) -> bool {
+        rules
+            .iter()
+            .any(|rule| matches!(rule, HttpLabelRule::Field { .. }))
     }
 
     fn validate_config(cfg: &HttpConfig) -> Result<()> {
@@ -138,15 +115,16 @@ impl HttpInstance {
     fn build_labels(
         rules: &[HttpLabelRule],
         headers: &HeaderMap,
-        json_body: Option<&Value>,
+        decoded_payload: Option<&Value>,
+        format: &dyn FormatHandler,
     ) -> HashMap<String, String> {
         let mut labels = HashMap::new();
 
         for rule in rules {
             match rule {
                 HttpLabelRule::Field { field, label } => {
-                    if let Some(value) = json_body.and_then(|body| extract_json_path(body, field)) {
-                        labels.insert(label.clone(), value_to_label(value));
+                    if let Some(value) = format.extract_field_path_value(decoded_payload, field) {
+                        labels.insert(label.clone(), value);
                     }
                 }
                 HttpLabelRule::Header { header, label } => {
@@ -165,6 +143,34 @@ impl HttpInstance {
         }
 
         labels
+    }
+
+    fn label_decode_format<'a>(
+        cfg: &'a HttpConfig,
+        headers: &'a HeaderMap,
+    ) -> Option<DecodeFormat<'a>> {
+        if !Self::needs_body_decode(&cfg.labels) {
+            return None;
+        }
+
+        let content_type = Self::resolved_content_type(cfg, headers)?;
+        let media_type = content_type.split(';').next()?.trim().to_ascii_lowercase();
+
+        if media_type == "application/json" || media_type.ends_with("+json") {
+            Some(DecodeFormat::Json)
+        } else {
+            Some(DecodeFormat::Other("unsupported"))
+        }
+    }
+
+    fn decode_payload_for_labels(
+        cfg: &HttpConfig,
+        headers: &HeaderMap,
+        payload: &[u8],
+        format: &dyn FormatHandler,
+    ) -> Option<Value> {
+        let decode_format = Self::label_decode_format(cfg, headers)?;
+        format.decode_payload(payload, decode_format)
     }
 
     fn resolved_content_type(cfg: &HttpConfig, headers: &HeaderMap) -> Option<String> {
@@ -187,12 +193,13 @@ impl HttpInstance {
             bail!("HTTP request to '{}' returned status {}", cfg.url, status);
         }
 
+        let format = PayloadFormatHandler::new(None);
         let headers = response.headers().clone();
         let content = response
             .bytes()
             .await
             .map_err(|err| anyhow::anyhow!("Failed to read HTTP response body: {}", err))?;
-        let json_body = serde_json::from_slice::<Value>(&content).ok();
+        let decoded_payload = Self::decode_payload_for_labels(cfg, &headers, &content, &format);
         let timestamp_us = current_timestamp_us();
 
         Ok(Record {
@@ -200,7 +207,7 @@ impl HttpInstance {
             entry_name: cfg.entry_name.clone(),
             content,
             content_type: Self::resolved_content_type(cfg, &headers),
-            labels: Self::build_labels(&cfg.labels, &headers, json_body.as_ref()),
+            labels: Self::build_labels(&cfg.labels, &headers, decoded_payload.as_ref(), &format),
         })
     }
 }
@@ -214,11 +221,8 @@ impl InputLauncher for HttpInstance {
         let client = create_client()?;
 
         info!(
-            "Launching HTTP input {} {} every {}s for entry '{}'",
-            cfg.method.as_reqwest_method(),
-            cfg.url,
-            cfg.repeat_interval,
-            cfg.entry_name
+            "Launching HTTP input GET {} every {}s for entry '{}'",
+            cfg.url, cfg.repeat_interval, cfg.entry_name
         );
 
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
@@ -277,7 +281,7 @@ fn create_client() -> Result<reqwest::Client> {
 }
 
 fn build_request(client: &reqwest::Client, cfg: &HttpConfig) -> reqwest::RequestBuilder {
-    let request = client.request(cfg.method.as_reqwest_method(), &cfg.url);
+    let request = client.get(&cfg.url);
 
     if let Some(token) = &cfg.bearer_token {
         request.bearer_auth(token)
@@ -290,9 +294,8 @@ fn build_request(client: &reqwest::Client, cfg: &HttpConfig) -> reqwest::Request
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        HttpConfig, HttpInstance, HttpLabelRule, HttpMethod, build_request, create_client,
-    };
+    use super::{HttpConfig, HttpInstance, HttpLabelRule, build_request, create_client};
+    use crate::formats::DecodeFormat;
     use crate::input::InputLauncher;
     use crate::message::Message;
     use reqwest::header::{CONTENT_TYPE, ETAG, HeaderMap, HeaderValue};
@@ -322,7 +325,6 @@ mod tests {
             url: "https://example.com/data".to_string(),
             repeat_interval: 5,
             entry_name: "http/data".to_string(),
-            method: HttpMethod::Get,
             content_type: None,
             bearer_token: None,
             basic_auth: None,
@@ -373,7 +375,6 @@ mod tests {
         assert_eq!(cfg.url, "https://example.com/data");
         assert_eq!(cfg.repeat_interval, 5);
         assert_eq!(cfg.entry_name, "http/data");
-        assert!(matches!(cfg.method, HttpMethod::Get));
         assert!(cfg.content_type.is_none());
         assert!(cfg.labels.is_empty());
     }
@@ -389,7 +390,12 @@ mod tests {
             }
         });
 
-        let labels = HttpInstance::build_labels(&rules, &headers, Some(&json));
+        let labels = HttpInstance::build_labels(
+            &rules,
+            &headers,
+            Some(&json),
+            &crate::formats::PayloadFormatHandler::new(None),
+        );
 
         assert_eq!(labels.get("source"), Some(&"http".to_string()));
         assert_eq!(labels.get("device"), Some(&"7".to_string()));
@@ -408,22 +414,50 @@ mod tests {
     }
 
     #[rstest]
-    #[case(HttpMethod::Head, reqwest::Method::HEAD)]
-    #[case(HttpMethod::Delete, reqwest::Method::DELETE)]
-    fn builds_request_with_method_and_auth(
-        mut http_cfg: HttpConfig,
-        #[case] method: HttpMethod,
-        #[case] expected_method: reqwest::Method,
+    fn detects_json_label_decode_format(http_cfg: HttpConfig, label_rules: Vec<HttpLabelRule>) {
+        let mut cfg = http_cfg;
+        cfg.labels = label_rules;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        );
+
+        let decode_format = HttpInstance::label_decode_format(&cfg, &headers);
+
+        assert!(matches!(decode_format, Some(DecodeFormat::Json)));
+    }
+
+    #[rstest]
+    fn skips_body_decode_for_non_json_payloads(
+        http_cfg: HttpConfig,
+        label_rules: Vec<HttpLabelRule>,
     ) {
+        let mut cfg = http_cfg;
+        cfg.labels = label_rules;
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+
+        let decoded_payload = HttpInstance::decode_payload_for_labels(
+            &cfg,
+            &headers,
+            br#"{"device":{"id":"sensor-a"}}"#,
+            &crate::formats::PayloadFormatHandler::new(None),
+        );
+
+        assert!(decoded_payload.is_none());
+    }
+
+    #[rstest]
+    fn builds_request_with_get_and_auth(mut http_cfg: HttpConfig) {
         http_cfg.url = "https://example.com/status".to_string();
         http_cfg.entry_name = "http/status".to_string();
-        http_cfg.method = method;
         http_cfg.bearer_token = Some("secret".to_string());
 
         let client = create_client().unwrap();
         let request = build_request(&client, &http_cfg).build().unwrap();
 
-        assert_eq!(request.method(), expected_method);
+        assert_eq!(request.method(), reqwest::Method::GET);
         assert_eq!(
             request
                 .headers()

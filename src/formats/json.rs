@@ -1,22 +1,17 @@
 use serde_json::Value;
 
-#[cfg(feature = "mqtt")]
 use anyhow::{Result, bail};
 
-#[cfg(feature = "mqtt")]
 use super::{AttachmentContext, DecodeFormat, FormatAttachment, FormatHandler};
 
-#[cfg(feature = "mqtt")]
 pub(crate) struct JsonFormatHandler;
 
-#[cfg(feature = "mqtt")]
 impl JsonFormatHandler {
     pub(crate) fn decode(&self, payload: &[u8]) -> Option<Value> {
         serde_json::from_slice(payload).ok()
     }
 }
 
-#[cfg(feature = "mqtt")]
 impl FormatHandler for JsonFormatHandler {
     fn decode_payload(&self, payload: &[u8], format: DecodeFormat<'_>) -> Option<Value> {
         match format {
