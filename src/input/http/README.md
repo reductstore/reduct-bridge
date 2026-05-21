@@ -20,9 +20,6 @@ repeat_interval = 10
 # Required: target entry name in remote bucket.
 entry_name = "http/metrics"
 
-# Optional HTTP method (default: GET).
-method = "GET"
-
 # Optional content type override for produced records.
 # If omitted, the response Content-Type header is used when available.
 content_type = "application/json"
@@ -56,7 +53,6 @@ labels = [
 url = "https://example.com/api/status"
 repeat_interval = 30
 entry_name = "http/status"
-method = "HEAD"
 labels = [
   { header = "etag", label = "etag" },
   { static = { source = "status_api" } }
@@ -70,8 +66,7 @@ password = "${HTTP_PASSWORD}"
 ## Runtime Notes
 
 - Each successful poll produces one record.
-- Requests support `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, and `OPTIONS`.
-- If `method` is omitted, `GET` is used.
+- Requests use `GET`.
 - Non-JSON responses are stored as raw response bytes.
 - JSON field labels are applied only when the response body can be parsed as JSON.
 - Failed requests and non-success HTTP statuses skip that polling cycle.
