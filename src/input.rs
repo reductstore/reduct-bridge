@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "http")]
+mod http;
 #[cfg(feature = "metrics")]
 mod metrics;
 #[cfg(feature = "mqtt")]
@@ -90,6 +92,13 @@ impl InputBuilder {
                 let input_cfg: mqtt::MqttConfig = parse_entry(input_table)?;
                 debug!("Creating MQTT launcher for input '{}'", input_name);
                 let launcher = mqtt::MqttInstance::new(input_cfg);
+                launcher.launch(pipeline_tx).await
+            }
+            #[cfg(feature = "http")]
+            "http" => {
+                let input_cfg: http::HttpConfig = parse_entry(input_table)?;
+                debug!("Creating HTTP launcher for input '{}'", input_name);
+                let launcher = http::HttpInstance::new(input_cfg);
                 launcher.launch(pipeline_tx).await
             }
             _ => bail!(

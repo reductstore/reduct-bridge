@@ -1,0 +1,72 @@
+# ReductStore remote destination.
+[[remotes.reduct]]
+# Unique remote name referenced by pipelines.<name>.remote.
+name = "local"
+# ReductStore base URL.
+url = "http://localhost:8383"
+# API token used for authentication.
+token_api = "***"
+# Target bucket for all records from this remote.
+bucket = "my-bucket"
+# Required key prefix inside the bucket.
+prefix = ""
+# Optional: create the bucket on startup if it does not exist.
+# Omit this table to require the bucket to exist before starting reduct-bridge.
+# [remotes.reduct.create_bucket]
+# quota_type = "FIFO" # NONE, FIFO, or HARD
+# quota_size = "1GB" # also accepts raw bytes, MB/GB/TB, or MiB/GiB/TiB
+
+# HTTP input configuration.
+# Structure: [inputs.http.<input_name>]
+[inputs.http.metrics_api]
+# Required: endpoint URL.
+# Supported schemes: http, https
+url = "https://example.com/api/metrics"
+# Required: polling interval in seconds.
+# Must be > 0.
+repeat_interval = 10
+# Required: target entry name in remote bucket.
+entry_name = "http/metrics"
+# Optional: override content type written to ReductStore.
+# If omitted, the response Content-Type header is used when available.
+content_type = "application/json"
+# Optional bearer token authentication.
+bearer_token = "${HTTP_TOKEN}"
+# Optional label rules (default = []):
+# 1) Dynamic JSON field label:
+#    { field = "path.to.value", label = "label_name" }
+# 2) Response header label:
+#    { header = "x-request-id", label = "request_id" }
+# 3) Static labels:
+#    { static = { source = "http", site = "lab" } }
+labels = [
+  { field = "device.id", label = "device" },
+  { field = "site", label = "site" },
+  { header = "etag", label = "revision" },
+  { header = "x-request-id", label = "request_id" },
+  { static = { source = "http" } }
+]
+
+# Optional HTTP input using basic authentication.
+[inputs.http.status_api]
+url = "https://example.com/api/status"
+repeat_interval = 30
+entry_name = "http/status"
+labels = [
+  { header = "etag", label = "etag" },
+  { static = { source = "status_api" } }
+]
+
+[inputs.http.status_api.basic_auth]
+username = "bridge"
+password = "${HTTP_PASSWORD}"
+
+
+# Pipelines
+[pipelines.http_metrics]
+remote = "local"
+inputs = ["metrics_api"]
+
+[pipelines.http_status]
+remote = "local"
+inputs = ["status_api"]

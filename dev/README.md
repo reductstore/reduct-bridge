@@ -1,21 +1,24 @@
 # Dev Environment
 
-## Start
+Each subdirectory contains a self-contained `docker-compose.yml` and config for a specific input type.
+
+## MQTT
 
 ```sh
 cargo build --features mqtt
-cd dev && docker compose up -d
+docker compose -f dev/mqtt/docker-compose.yml up
 ```
 
-## Watch (auto-restart on rebuild)
-
-```sh
-cargo watch -x 'build --features mqtt' -s 'docker compose -f dev/docker-compose.yml restart bridge'
-```
-
-## Regenerate proto files
+### Regenerate proto files
 
 ```sh
 protoc --proto_path=dev/mqtt --include_imports --descriptor_set_out=dev/mqtt/factory.desc factory.proto
 protoc --proto_path=dev/mqtt --python_out=dev/mqtt factory.proto
+```
+
+## HTTP
+
+```sh
+cargo build --features http
+docker compose -f dev/http/docker-compose.yml up
 ```

@@ -16,6 +16,7 @@ An `input` is a data source. It reads data from a system and produces records fo
 
 Supported input types include:
 
+- [HTTP](src/input/http/README.md) - poll HTTP/HTTPS endpoints on a fixed interval and store response payloads with optional JSON/header label mapping.
 - [Metrics](src/input/metrics/README.md) - collect host CPU, memory, and disk metrics as JSON records.
 - [MQTT](src/input/mqtt/README.md) - subscribe to MQTT v3/v5 topics over `mqtt://` or `mqtts://` and store raw payloads with optional payload/property label mapping.
 - [Shell](src/input/shell/README.md) - run shell commands on a fixed interval and store output lines as records.
@@ -28,6 +29,7 @@ ReductBridge supports different payload formats.
 Support means ReductBridge can parse payloads, extract labels, and, when schema information is available, store that schema in ReductStore.
 
 - JSON: find values by field path (example: [examples/mqtt_config.toml](examples/mqtt_config.toml)).
+- HTTP input: poll HTTP/HTTPS endpoints and extract optional header/JSON labels (example: [examples/http_config.toml](examples/http_config.toml)).
 - Protobuf: find values by field path (with schema) or by field ID/type (example: [examples/mqtt_protobuf_config.toml](examples/mqtt_protobuf_config.toml)).
 - ROS formats: decode ROS message payloads for labels and store the payloads as records (example: [examples/ros_config.toml](examples/ros_config.toml)).
 
@@ -80,7 +82,7 @@ Published packages and Docker images are split into these build types so each ar
 | --- | --- | --- | --- |
 | `ros1` | ROS1 robotics bundle. | [ROS1](src/input/ros1/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-ros1`; Docker build type: `ros1`; binary: `bridge-ros1.x86_64-unknown-linux-gnu.tar.gz` |
 | `ros2` | ROS2 robotics bundle. | [ROS2](src/input/ros2/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-ros2`; Docker build types: `ros2-jazzy`, `ros2-humble`; binaries: `bridge-ros2-jazzy.x86_64-unknown-linux-gnu.tar.gz`, `bridge-ros2-humble.x86_64-unknown-linux-gnu.tar.gz` |
-| `iot` | MQTT/IIoT bundle. | [MQTT](src/input/mqtt/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-iot`; Docker build type: `iot`; binary: `bridge-iot.x86_64-unknown-linux-gnu.tar.gz` |
+| `iot` | HTTP/MQTT IIoT bundle. | [HTTP](src/input/http/README.md), [MQTT](src/input/mqtt/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-iot`; Docker build type: `iot`; binary: `bridge-iot.x86_64-unknown-linux-gnu.tar.gz` |
 
 Note: ROS2 binary and Docker artifacts are published per ROS distribution: `ros2-jazzy` and `ros2-humble`. The ROS2 snap is published as `reduct-bridge-ros2` and currently uses the Jazzy build.
 
@@ -139,6 +141,7 @@ cargo install reduct-bridge
 ```
 
 `cargo install reduct-bridge` builds the default feature set, which includes only the `shell` input.
+For HTTP-specific build and runtime guidance, see [HTTP input documentation](src/input/http/README.md).
 For MQTT-specific build and runtime guidance, see [MQTT input documentation](src/input/mqtt/README.md).
 The MQTT input is grouped under the `iot` Cargo feature alongside future IoT protocols.
 For metrics-specific build and runtime guidance, see [Metrics input documentation](src/input/metrics/README.md).
@@ -150,6 +153,7 @@ To build additional inputs explicitly from source:
 cargo build --no-default-features --features ros1
 cargo build --no-default-features --features ros2
 cargo build --no-default-features --features iot
+cargo build --no-default-features --features all-inputs
 ```
 
 ## Usage

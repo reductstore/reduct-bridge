@@ -1,0 +1,35 @@
+# =============================================================================
+# REMOTES: destination bucket in ReductStore
+# =============================================================================
+
+[[remotes.reduct]]
+name = "local"
+url = "http://reductstore:8383"
+token_api = ""
+bucket = "http-test"
+prefix = ""
+
+# =============================================================================
+# INPUT: HTTP polling
+# Polls a local dummy API every 5 seconds and stores the JSON response.
+# =============================================================================
+
+[inputs.http.weather]
+url = "http://api:8080/weather"
+repeat_interval = 5
+entry_name = "http/weather"
+content_type = "application/json"
+
+labels = [
+  { field = "city", label = "city" },
+  { field = "unit", label = "unit" },
+  { static = { source = "http-poll" } }
+]
+
+# =============================================================================
+# PIPELINES
+# =============================================================================
+
+[pipelines.http]
+inputs = ["weather"]
+remote = "local"

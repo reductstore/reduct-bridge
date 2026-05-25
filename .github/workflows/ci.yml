@@ -6,12 +6,14 @@ on:
       - "v*"
     paths-ignore:
       - docs/**
+      - dev/**
       - README.md
       - CHANGELOG.md
 
   pull_request:
     paths-ignore:
       - docs/**
+      - dev/**
       - README.md
       - CHANGELOG.md
 
@@ -71,6 +73,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prevent apt upgrade from triggering snap store
+        if: ${{ matrix.ros_setup_script != '' }}
+        run: sudo apt-mark hold firefox snapd
       - name: Install ROS2
         if: ${{ matrix.ros_setup_script != '' }}
         uses: ros-tooling/setup-ros@2b7b7e10fd30ff131dfb33248ddd71c5ba31dd30
@@ -124,6 +129,9 @@ jobs:
       RUST_LOG: debug
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prevent apt upgrade from triggering snap store
+        if: ${{ matrix.ros_setup_script != '' }}
+        run: sudo apt-mark hold firefox snapd
       - name: Install ROS2
         if: ${{ matrix.ros_setup_script != '' }}
         uses: ros-tooling/setup-ros@2b7b7e10fd30ff131dfb33248ddd71c5ba31dd30
@@ -236,6 +244,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prevent apt upgrade from triggering snap store
+        run: sudo apt-mark hold firefox snapd
       - name: Install ROS2
         uses: ros-tooling/setup-ros@2b7b7e10fd30ff131dfb33248ddd71c5ba31dd30
         with:
@@ -265,6 +275,8 @@ jobs:
       RUST_LOG: debug
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prevent apt upgrade from triggering snap store
+        run: sudo apt-mark hold firefox snapd
       - name: Install ROS2
         uses: ros-tooling/setup-ros@2b7b7e10fd30ff131dfb33248ddd71c5ba31dd30
         with:
