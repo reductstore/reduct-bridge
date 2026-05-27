@@ -26,27 +26,43 @@ pub fn find_named_entry<'a>(
         .and_then(Value::as_table)
         .with_context(|| format!("Missing '{section}' section in configuration"))?;
 
+    let mut matched: Option<(&str, &Table)> = None;
+
     for (entry_type, entries) in section_table {
-        let Some(entries) = entries.as_array() else {
-            continue;
-        };
+        if let Some(entries) = entries.as_array() {
+            for entry in entries {
+                let Some(entry_table) = entry.as_table() else {
+                    continue;
+                };
 
-        for entry in entries {
-            let Some(entry_table) = entry.as_table() else {
-                continue;
-            };
+                if entry_table
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| name == target_name)
+                {
+                    if matched.is_some() {
+                        bail!(
+                            "Duplicate [{section}.*] entry named '{target_name}' found across configuration forms"
+                        );
+                    }
+                    matched = Some((entry_type.as_str(), entry_table));
+                }
+            }
+        }
 
-            if entry_table
-                .get("name")
-                .and_then(Value::as_str)
-                .is_some_and(|name| name == target_name)
-            {
-                return Ok((entry_type.as_str(), entry_table));
+        if let Some(entries_table) = entries.as_table() {
+            if let Some(entry_table) = entries_table.get(target_name).and_then(Value::as_table) {
+                if matched.is_some() {
+                    bail!(
+                        "Duplicate [{section}.*] entry named '{target_name}' found across configuration forms"
+                    );
+                }
+                matched = Some((entry_type.as_str(), entry_table));
             }
         }
     }
 
-    bail!("Missing [[{section}.*]] entry named '{target_name}'")
+    matched.ok_or_else(|| anyhow::anyhow!("Missing [[{section}.*]] entry named '{target_name}'"))
 }
 
 pub fn find_keyed_entry<'a>(
@@ -86,4 +102,67 @@ pub fn parse_config_file(path: impl AsRef<Path>) -> Result<Value, Error> {
     let config: Value = toml::from_str(&config_text)
         .with_context(|| format!("Failed to parse TOML config from {}", path.display()))?;
     Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_named_entry;
+    use toml::Value;
+
+    #[test]
+    fn finds_named_entry_in_array_of_tables() {
+        let cfg: Value = toml::from_str(
+            r#"
+[remotes]
+[[remotes.reduct]]
+name = "local"
+url = "http://localhost:8383"
+"#,
+        )
+        .expect("parse");
+
+        let (kind, table) = find_named_entry(&cfg, "remotes", "local").expect("find");
+        assert_eq!(kind, "reduct");
+        assert_eq!(
+            table.get("url").and_then(Value::as_str),
+            Some("http://localhost:8383")
+        );
+    }
+
+    #[test]
+    fn finds_named_entry_in_keyed_table() {
+        let cfg: Value = toml::from_str(
+            r#"
+[remotes.reduct.local]
+url = "http://localhost:8383"
+"#,
+        )
+        .expect("parse");
+
+        let (kind, table) = find_named_entry(&cfg, "remotes", "local").expect("find");
+        assert_eq!(kind, "reduct");
+        assert_eq!(
+            table.get("url").and_then(Value::as_str),
+            Some("http://localhost:8383")
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_name_in_array_of_tables() {
+        let cfg: Value = toml::from_str(
+            r#"
+[[remotes.reduct]]
+name = "local"
+url = "http://localhost:8383"
+
+[[remotes.reduct]]
+name = "local"
+url = "http://localhost:8384"
+"#,
+        )
+        .expect("parse");
+
+        let err = find_named_entry(&cfg, "remotes", "local").expect_err("duplicate must fail");
+        assert!(err.to_string().contains("Duplicate"));
+    }
 }

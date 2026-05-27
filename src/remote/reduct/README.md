@@ -6,10 +6,10 @@ Use this remote to write pipeline data to ReductStore.
 
 ```toml
 # Remote definition path:
-[[remotes.reduct]]
+[remotes.reduct.local]
 
 # Required: unique remote name referenced by pipelines.<name>.remote.
-name = "local"
+
 
 # Required: ReductStore base URL.
 url = "http://localhost:8383"
@@ -36,7 +36,7 @@ batch_max_interval_ms = 1000
 
 # Optional: create the bucket on startup if it does not exist.
 # Omit this table to require the bucket to exist before starting reduct-bridge.
-[remotes.reduct.create_bucket]
+[remotes.reduct.local.create_bucket]
 # Required when create_bucket is configured: NONE, FIFO, or HARD.
 quota_type = "FIFO"
 
@@ -51,7 +51,7 @@ quota_size = "1GB"
 
 - Records are buffered and flushed by count, size, or interval.
 - Invalid batching values (`0`) are not allowed.
-- Buckets are not created automatically unless `[remotes.reduct.create_bucket]` is configured.
+- Buckets are not created automatically unless `[remotes.reduct.local.create_bucket]` is configured.
 - Automatic bucket creation only applies when the configured bucket is missing; existing bucket settings are not changed.
 
 ## Changes
