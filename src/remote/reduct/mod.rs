@@ -82,7 +82,7 @@ impl ReductInstance {
             Err(err) if err.status() == ErrorCode::NotFound => {
                 let Some(create_bucket) = &cfg.create_bucket else {
                     bail!(
-                        "Failed to access bucket '{}': bucket does not exist. Configure [remotes.reduct.create_bucket] to create it automatically.",
+                        "Failed to access bucket '{}': bucket does not exist. Configure [remotes.reduct.<name>.create_bucket] to create it automatically.",
                         cfg.bucket
                     );
                 };
@@ -296,6 +296,19 @@ mod config_tests {
     fn build_remote_config(create_bucket: &str) -> String {
         format!(
             r#"
+[remotes.reduct.local]
+url = "http://localhost:8383"
+token_api = ""
+bucket = "my-bucket"
+prefix = ""
+{create_bucket}
+"#
+        )
+    }
+
+    fn build_legacy_remote_config(create_bucket: &str) -> String {
+        format!(
+            r#"
 [[remotes.reduct]]
 name = "local"
 url = "http://localhost:8383"
@@ -318,7 +331,7 @@ prefix = ""
         let cfg = parse_reduct_remote_config(&build_remote_config(&format!(
             r#"
 
-[remotes.reduct.create_bucket]
+[remotes.reduct.local.create_bucket]
 quota_type = "FIFO"
 quota_size = {quota_size}
 "#
@@ -337,7 +350,7 @@ quota_size = {quota_size}
         let err = parse_reduct_remote_config(&build_remote_config(&format!(
             r#"
 
-[remotes.reduct.create_bucket]
+[remotes.reduct.local.create_bucket]
 quota_type = "FIFO"
 quota_size = {quota_size}
 "#
@@ -354,6 +367,14 @@ quota_size = {quota_size}
             parse_reduct_remote_config(&build_remote_config("")).expect("parse remote config");
 
         assert!(cfg.create_bucket.is_none());
+    }
+
+    #[test]
+    fn keeps_legacy_array_of_tables_format_compatible() {
+        let cfg = parse_reduct_remote_config(&build_legacy_remote_config(""))
+            .expect("parse legacy remote config");
+
+        assert_eq!(cfg.bucket, "my-bucket");
     }
 }
 

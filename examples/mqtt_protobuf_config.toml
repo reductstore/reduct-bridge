@@ -1,7 +1,7 @@
 # Protobuf MQTT example using descriptor-backed field-path labels.
 
-[[remotes.reduct]]
-name = "local"
+[remotes.reduct.local]
+
 url = "http://localhost:8383"
 token_api = "***"
 bucket = "mqtt-protobuf"

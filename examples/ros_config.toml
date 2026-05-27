@@ -1,7 +1,7 @@
 # ReductStore remote destination.
-[[remotes.reduct]]
+[remotes.reduct.local]
 # Unique remote name referenced by pipelines.<name>.remote.
-name = "local"
+
 # ReductStore base URL.
 url = "http://localhost:8383"
 # API token used for authentication.
@@ -19,7 +19,7 @@ batch_max_size_bytes = 8388608
 batch_max_interval_ms = 1000
 # Optional: create the bucket on startup if it does not exist.
 # Omit this table to require the bucket to exist before starting reduct-bridge.
-# [remotes.reduct.create_bucket]
+# [remotes.reduct.local.create_bucket]
 # quota_type = "FIFO" # NONE, FIFO, or HARD
 # quota_size = "1GB" # also accepts raw bytes, MB/GB/TB, or MiB/GiB/TiB
 
