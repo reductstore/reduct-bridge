@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use anyhow::{Context, Error, bail};
+use log::warn;
 use serde::de::DeserializeOwned;
 use std::path::Path;
 use toml::{Value, value::Table};
@@ -45,6 +46,10 @@ pub fn find_named_entry<'a>(
                             "Duplicate [{section}.*] entry named '{target_name}' found across configuration forms"
                         );
                     }
+                    warn!(
+                        "Deprecated array-of-tables syntax [[{}.{}]] with name='{}' detected; prefer keyed syntax [{}.{}.{}]",
+                        section, entry_type, target_name, section, entry_type, target_name
+                    );
                     matched = Some((entry_type.as_str(), entry_table));
                 }
             }
