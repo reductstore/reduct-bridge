@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP input for polling HTTP/HTTPS endpoints on a fixed interval with GET requests, optional bearer/basic auth, header/static/JSON field label mapping, and HTTP-specific tests and documentation, [PR-33](https://github.com/reductstore/reduct-bridge/pull/33).
 - Optional ReductStore bucket creation via `[remotes.reduct.create_bucket]`, with configurable `quota_type`, numeric or human-readable `quota_size` values such as `"1GB"` and `"4GiB"`, updated examples/docs, and parsing coverage for valid and invalid unit strings, [PR-34](https://github.com/reductstore/reduct-bridge/pull/34).
 - Bundle-style `ros1`, `ros2`, and `iot` build features with CI and installation documentation updates, [PR-37](https://github.com/reductstore/reduct-bridge/pull/37).
+- Preferred keyed TOML syntax for Reduct remotes (`[remotes.reduct.<name>]`) while keeping `[[remotes.reduct]]` backward compatible, including updated docs/examples and parser coverage, [PR-42](https://github.com/reductstore/reduct-bridge/pull/42).
 
 ## 0.2.1 - 2026-05-19
 
