@@ -50,8 +50,10 @@ pub struct RemoteConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateBucketConfig {
+    #[serde(default = "default_quota_type")]
     pub quota_type: QuotaType,
-    pub quota_size: ByteSize,
+    #[serde(default)]
+    pub quota_size: Option<ByteSize>,
 }
 
 pub struct ReductInstance {
@@ -68,6 +70,10 @@ fn default_batch_max_interval_ms() -> u64 {
 
 fn default_batch_max_size_bytes() -> usize {
     DEFAULT_BATCH_MAX_SIZE_BYTES
+}
+
+fn default_quota_type() -> QuotaType {
+    QuotaType::NONE
 }
 
 impl ReductInstance {
@@ -88,14 +94,24 @@ impl ReductInstance {
                 };
 
                 info!(
-                    "Bucket '{}' does not exist, creating it with quota type {:?} and quota size {} bytes",
-                    cfg.bucket, create_bucket.quota_type, create_bucket.quota_size
+                    "Bucket '{}' does not exist, creating it with quota type {:?}{}",
+                    cfg.bucket,
+                    create_bucket.quota_type,
+                    create_bucket
+                        .quota_size
+                        .map(|size| format!(" and quota size {} bytes", size))
+                        .unwrap_or_default()
                 );
 
-                client
+                let mut request = client
                     .create_bucket(&cfg.bucket)
-                    .quota_type(create_bucket.quota_type.clone())
-                    .quota_size(create_bucket.quota_size.as_u64())
+                    .quota_type(create_bucket.quota_type.clone());
+
+                if let Some(quota_size) = create_bucket.quota_size {
+                    request = request.quota_size(quota_size.as_u64());
+                }
+
+                request
                     .exist_ok(true)
                     .send()
                     .await
@@ -205,8 +221,17 @@ impl RemoteInstanceLauncher for ReductInstance {
             bail!("Reduct remote batch_max_interval_ms must be greater than 0");
         }
         if let Some(create_bucket) = &cfg.create_bucket {
-            if create_bucket.quota_size.as_u64() == 0 {
-                bail!("Reduct remote create_bucket.quota_size must be greater than 0");
+            if matches!(create_bucket.quota_type, QuotaType::FIFO | QuotaType::HARD)
+                && create_bucket.quota_size.is_none()
+            {
+                bail!(
+                    "Reduct remote create_bucket.quota_size is required when create_bucket.quota_type is FIFO or HARD"
+                );
+            }
+            if let Some(quota_size) = create_bucket.quota_size {
+                if quota_size.as_u64() == 0 {
+                    bail!("Reduct remote create_bucket.quota_size must be greater than 0");
+                }
             }
         }
 
@@ -340,7 +365,7 @@ quota_size = {quota_size}
 
         let create_bucket = cfg.create_bucket.expect("create_bucket config");
         assert_eq!(create_bucket.quota_type, QuotaType::FIFO);
-        assert_eq!(create_bucket.quota_size, expected_size);
+        assert_eq!(create_bucket.quota_size, Some(expected_size));
     }
 
     #[rstest]
@@ -362,6 +387,21 @@ quota_size = {quota_size}
     }
 
     #[test]
+    fn defaults_create_bucket_quota_type_to_none_and_makes_size_optional() {
+        let cfg = parse_reduct_remote_config(&build_remote_config(
+            r#"
+
+[remotes.reduct.local.create_bucket]
+"#,
+        ))
+        .expect("parse remote config");
+
+        let create_bucket = cfg.create_bucket.expect("create_bucket config");
+        assert_eq!(create_bucket.quota_type, QuotaType::NONE);
+        assert_eq!(create_bucket.quota_size, None);
+    }
+
+    #[test]
     fn omits_create_bucket_config_by_default() {
         let cfg =
             parse_reduct_remote_config(&build_remote_config("")).expect("parse remote config");
@@ -380,7 +420,10 @@ quota_size = {quota_size}
 
 #[cfg(test)]
 mod unit_tests {
-    use super::ReductInstance;
+    use super::{CreateBucketConfig, ReductInstance, RemoteConfig};
+    use crate::remote::RemoteInstanceLauncher;
+    use bytesize::ByteSize;
+    use reduct_rs::QuotaType;
 
     #[test]
     fn normalize_entry_path_collapses_extra_slashes() {
@@ -393,6 +436,68 @@ mod unit_tests {
             Some("root/a/b".to_string())
         );
         assert_eq!(ReductInstance::normalize_entry_path("/", "//"), None);
+    }
+
+    fn base_remote_config(create_bucket: Option<CreateBucketConfig>) -> RemoteConfig {
+        RemoteConfig {
+            url: "http://127.0.0.1:8383".to_string(),
+            token_api: "".to_string(),
+            bucket: "bucket".to_string(),
+            prefix: "".to_string(),
+            batch_max_records: 1,
+            batch_max_size_bytes: 1,
+            batch_max_interval_ms: 1,
+            create_bucket,
+        }
+    }
+
+    #[tokio::test]
+    async fn launch_rejects_fifo_without_quota_size() {
+        let remote = ReductInstance::new(base_remote_config(Some(CreateBucketConfig {
+            quota_type: QuotaType::FIFO,
+            quota_size: None,
+        })));
+
+        let err = remote
+            .launch()
+            .await
+            .expect_err("FIFO without quota size should fail validation");
+        assert!(
+            err.to_string().contains("quota_size is required"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn launch_allows_none_without_quota_size() {
+        let remote = ReductInstance::new(base_remote_config(Some(CreateBucketConfig {
+            quota_type: QuotaType::NONE,
+            quota_size: None,
+        })));
+
+        if let Err(err) = remote.launch().await {
+            assert!(
+                !err.to_string().contains("quota_size is required"),
+                "unexpected validation error: {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn launch_rejects_zero_quota_size() {
+        let remote = ReductInstance::new(base_remote_config(Some(CreateBucketConfig {
+            quota_type: QuotaType::HARD,
+            quota_size: Some(ByteSize(0)),
+        })));
+
+        let err = remote
+            .launch()
+            .await
+            .expect_err("zero quota size should fail validation");
+        assert!(
+            err.to_string().contains("must be greater than 0"),
+            "unexpected error: {err}"
+        );
     }
 }
 
@@ -525,7 +630,7 @@ mod ci_tests {
             bucket_name.clone(),
             Some(CreateBucketConfig {
                 quota_type: QuotaType::FIFO,
-                quota_size: ByteSize(1024 * 1024 * 1024),
+                quota_size: Some(ByteSize(1024 * 1024 * 1024)),
             }),
         ));
 
@@ -563,7 +668,7 @@ mod ci_tests {
             bucket_name.clone(),
             Some(CreateBucketConfig {
                 quota_type: QuotaType::FIFO,
-                quota_size: ByteSize(1024 * 1024 * 1024),
+                quota_size: Some(ByteSize(1024 * 1024 * 1024)),
             }),
         ));
 
