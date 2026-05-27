@@ -475,14 +475,12 @@ mod unit_tests {
             quota_size: None,
         })));
 
-        let err = remote
-            .launch()
-            .await
-            .expect_err("launch should fail later because server is unavailable");
-        assert!(
-            !err.to_string().contains("quota_size is required"),
-            "unexpected validation error: {err}"
-        );
+        if let Err(err) = remote.launch().await {
+            assert!(
+                !err.to_string().contains("quota_size is required"),
+                "unexpected validation error: {err}"
+            );
+        }
     }
 
     #[tokio::test]

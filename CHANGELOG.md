@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional ReductStore bucket creation via `[remotes.reduct.create_bucket]`, with configurable `quota_type`, numeric or human-readable `quota_size` values such as `"1GB"` and `"4GiB"`, updated examples/docs, and parsing coverage for valid and invalid unit strings, [PR-34](https://github.com/reductstore/reduct-bridge/pull/34).
 - Bundle-style `ros1`, `ros2`, and `iot` build features with CI and installation documentation updates, [PR-37](https://github.com/reductstore/reduct-bridge/pull/37).
 - Preferred keyed TOML syntax for Reduct remotes (`[remotes.reduct.<name>]`) while keeping `[[remotes.reduct]]` backward compatible, now with deprecation warnings when the legacy array syntax is used, including updated docs/examples and parser coverage, [PR-42](https://github.com/reductstore/reduct-bridge/pull/42).
+- Improved Reduct `create_bucket` quota UX by defaulting `quota_type` to `NONE`, requiring `quota_size` only for `FIFO`/`HARD`, and aligning launch/config validation and docs with this behavior, [PR-43](https://github.com/reductstore/reduct-bridge/pull/43).
 
 ## 0.2.1 - 2026-05-19
 
