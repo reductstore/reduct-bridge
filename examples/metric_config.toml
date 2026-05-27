@@ -13,8 +13,8 @@ prefix = ""
 # Optional: create the bucket on startup if it does not exist.
 # Omit this table to require the bucket to exist before starting reduct-bridge.
 # [remotes.reduct.local.create_bucket]
-# quota_type = "FIFO" # NONE, FIFO, or HARD
-# quota_size = "1GB" # also accepts raw bytes, MB/GB/TB, or MiB/GiB/TiB
+# quota_type = "FIFO" # optional, defaults to NONE; valid: NONE, FIFO, HARD
+# quota_size = "1GB" # required only for FIFO/HARD; also accepts raw bytes, MB/GB/TB, or MiB/GiB/TiB
 
 # Metrics input configuration.
 # Structure: [inputs.metrics.<input_name>]

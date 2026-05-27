@@ -37,10 +37,10 @@ batch_max_interval_ms = 1000
 # Optional: create the bucket on startup if it does not exist.
 # Omit this table to require the bucket to exist before starting reduct-bridge.
 [remotes.reduct.local.create_bucket]
-# Required when create_bucket is configured: NONE, FIFO, or HARD.
+# Optional when create_bucket is configured: NONE, FIFO, or HARD (default: NONE).
 quota_type = "FIFO"
 
-# Required when create_bucket is configured: quota size as bytes or a unit string.
+# Required only for FIFO/HARD quota types.
 # Accepted examples: 1073741824, "1GB", "512MB", "4GiB", "1.5TiB", "500 B".
 # Accepted decimal units: B, K/KB, M/MB, G/GB, T/TB, P/PB, E/EB.
 # Accepted binary units: Ki/KiB, Mi/MiB, Gi/GiB, Ti/TiB, Pi/PiB, Ei/EiB.
