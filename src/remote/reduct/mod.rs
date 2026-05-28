@@ -618,7 +618,7 @@ mod ci_tests {
     use bytes::Bytes;
     use bytesize::ByteSize;
     use futures_util::StreamExt;
-    use reduct_rs::{QuotaType, ReductClient};
+    use reduct_rs::{ErrorCode, QuotaType, ReductClient};
     use rstest::{fixture, rstest};
     #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
     use serde_json::json;
