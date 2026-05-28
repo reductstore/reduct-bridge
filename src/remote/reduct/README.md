@@ -34,6 +34,11 @@ batch_max_size_bytes = 8388608
 # Periodic flush interval in milliseconds (default: 1000, must be > 0).
 batch_max_interval_ms = 1000
 
+# Optional: periodically resend missing attachments for known entries.
+# Default: 300000 (enabled, every 5 minutes).
+# Set to 0 to disable periodic resend.
+attachments_resend_interval_ms = 300000
+
 # Optional: create the bucket on startup if it does not exist.
 # Omit this table to require the bucket to exist before starting reduct-bridge.
 [remotes.reduct.local.create_bucket]
@@ -50,6 +55,8 @@ quota_size = "1GB"
 ## Runtime Notes
 
 - Records are buffered and flushed by count, size, or interval.
+- `attachments_resend_interval_ms` defaults to `300000` (enabled). Set it to `0` to disable periodic attachment resend.
+- The resend loop writes only missing attachment keys for entries already observed by this running bridge instance.
 - Invalid batching values (`0`) are not allowed.
 - Buckets are not created automatically unless `[remotes.reduct.local.create_bucket]` is configured.
 - Automatic bucket creation only applies when the configured bucket is missing; existing bucket settings are not changed.

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bundle-style `ros1`, `ros2`, and `iot` build features with CI and installation documentation updates, [PR-37](https://github.com/reductstore/reduct-bridge/pull/37).
 - Preferred keyed TOML syntax for Reduct remotes (`[remotes.reduct.<name>]`) while keeping `[[remotes.reduct]]` backward compatible, now with deprecation warnings when the legacy array syntax is used, including updated docs/examples and parser coverage, [PR-42](https://github.com/reductstore/reduct-bridge/pull/42).
 - Improved Reduct `create_bucket` quota UX by defaulting `quota_type` to `NONE`, requiring `quota_size` only for `FIFO`/`HARD`, and aligning launch/config validation and docs with this behavior, [PR-43](https://github.com/reductstore/reduct-bridge/pull/43).
+- Reduct remote attachment reconciliation with `attachments_resend_interval_ms` (default `300000`, `0` disables) to periodically restore missing attachments, including config/docs coverage and CI tests for enabled/disabled behavior, [PR-45](https://github.com/reductstore/reduct-bridge/pull/45).
 
 ## 0.2.1 - 2026-05-19
 

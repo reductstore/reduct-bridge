@@ -30,6 +30,7 @@ const CHANNEL_SIZE: usize = 1024;
 const DEFAULT_BATCH_MAX_RECORDS: usize = 80;
 const DEFAULT_BATCH_MAX_SIZE_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_BATCH_MAX_INTERVAL_MS: u64 = 1000;
+const DEFAULT_ATTACHMENTS_RESEND_INTERVAL_MS: u64 = 300_000;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RemoteConfig {
@@ -43,6 +44,8 @@ pub struct RemoteConfig {
     pub batch_max_size_bytes: usize,
     #[serde(default = "default_batch_max_interval_ms")]
     pub batch_max_interval_ms: u64,
+    #[serde(default = "default_attachments_resend_interval_ms")]
+    pub attachments_resend_interval_ms: u64,
 
     #[serde(default)]
     pub create_bucket: Option<CreateBucketConfig>,
@@ -70,6 +73,10 @@ fn default_batch_max_interval_ms() -> u64 {
 
 fn default_batch_max_size_bytes() -> usize {
     DEFAULT_BATCH_MAX_SIZE_BYTES
+}
+
+fn default_attachments_resend_interval_ms() -> u64 {
+    DEFAULT_ATTACHMENTS_RESEND_INTERVAL_MS
 }
 
 fn default_quota_type() -> QuotaType {
@@ -190,7 +197,7 @@ impl ReductInstance {
     }
 
     #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
-    async fn write_attachment(cfg: &RemoteConfig, bucket: &Bucket, attachment: Attachment) {
+    async fn write_attachment(cfg: &RemoteConfig, bucket: &Bucket, attachment: &Attachment) {
         let Some(entry) = Self::normalize_entry_path(&cfg.prefix, &attachment.entry_name) else {
             warn!(
                 "Skipping attachment with invalid entry path prefix='{}' entry_name='{}'",
@@ -200,9 +207,67 @@ impl ReductInstance {
         };
 
         let mut attachments = std::collections::HashMap::new();
-        attachments.insert(attachment.key, attachment.payload);
+        attachments.insert(attachment.key.clone(), attachment.payload.clone());
         if let Err(err) = bucket.write_attachments(&entry, attachments).await {
             warn!("Failed to write attachment for entry '{}': {}", entry, err);
+        }
+    }
+
+    #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
+    fn update_attachment_cache(
+        cfg: &RemoteConfig,
+        cache: &mut std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, serde_json::Value>,
+        >,
+        attachment: &Attachment,
+    ) {
+        let Some(entry) = Self::normalize_entry_path(&cfg.prefix, &attachment.entry_name) else {
+            return;
+        };
+
+        cache
+            .entry(entry)
+            .or_default()
+            .insert(attachment.key.clone(), attachment.payload.clone());
+    }
+
+    async fn resend_missing_attachments(
+        bucket: &Bucket,
+        cache: &std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, serde_json::Value>,
+        >,
+    ) {
+        for (entry, cached_attachments) in cache {
+            let existing_attachments = match bucket.read_attachments(entry).await {
+                Ok(attachments) => attachments,
+                Err(err) => {
+                    warn!(
+                        "Failed to read attachments for entry '{}' during periodic resend: {}",
+                        entry, err
+                    );
+                    continue;
+                }
+            };
+
+            let mut missing_attachments = std::collections::HashMap::new();
+            for (key, payload) in cached_attachments {
+                if !existing_attachments.contains_key(key) {
+                    missing_attachments.insert(key.clone(), payload.clone());
+                }
+            }
+
+            if missing_attachments.is_empty() {
+                continue;
+            }
+
+            if let Err(err) = bucket.write_attachments(entry, missing_attachments).await {
+                warn!(
+                    "Failed to resend missing attachments for entry '{}': {}",
+                    entry, err
+                );
+            }
         }
     }
 }
@@ -243,13 +308,14 @@ impl RemoteInstanceLauncher for ReductInstance {
         let (tx, mut rx) = channel::<Message>(CHANNEL_SIZE);
         let bucket: Bucket = Self::resolve_bucket(&client, &cfg).await?;
         info!(
-            "Launching Reduct remote '{}' bucket '{}' prefix '{}' batch >{} records, >{} bytes, every {}ms",
+            "Launching Reduct remote '{}' bucket '{}' prefix '{}' batch >{} records, >{} bytes, every {}ms; attachments resend interval {}ms (0 disables)",
             cfg.url,
             cfg.bucket,
             cfg.prefix,
             cfg.batch_max_records,
             cfg.batch_max_size_bytes,
-            cfg.batch_max_interval_ms
+            cfg.batch_max_interval_ms,
+            cfg.attachments_resend_interval_ms,
         );
 
         let task = tokio::spawn(async move {
@@ -257,6 +323,18 @@ impl RemoteInstanceLauncher for ReductInstance {
             let mut batch = bucket.write_record_batch();
             let mut flush_ticker = interval(Duration::from_millis(cfg.batch_max_interval_ms));
             flush_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            let mut attachment_cache = std::collections::HashMap::<
+                String,
+                std::collections::HashMap<String, serde_json::Value>,
+            >::new();
+            let mut attachments_resend_ticker = if cfg.attachments_resend_interval_ms > 0 {
+                let mut ticker =
+                    interval(Duration::from_millis(cfg.attachments_resend_interval_ms));
+                ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+                Some(ticker)
+            } else {
+                None
+            };
 
             loop {
                 tokio::select! {
@@ -274,7 +352,8 @@ impl RemoteInstanceLauncher for ReductInstance {
                             }
                             #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
                             Some(Message::Attachment(attachment)) => {
-                                Self::write_attachment(&cfg, &bucket, attachment).await;
+                                Self::write_attachment(&cfg, &bucket, &attachment).await;
+                                Self::update_attachment_cache(&cfg, &mut attachment_cache, &attachment);
                             }
                             Some(Message::Stop) => {
                                 info!("Stop message received, flushing Reduct batch before shutdown");
@@ -287,6 +366,16 @@ impl RemoteInstanceLauncher for ReductInstance {
                                 break;
                             }
                         }
+                    }
+                    _ = async {
+                        match attachments_resend_ticker.as_mut() {
+                            Some(ticker) => {
+                                ticker.tick().await;
+                            }
+                            None => std::future::pending::<()>().await,
+                        }
+                    } => {
+                        Self::resend_missing_attachments(&bucket, &attachment_cache).await;
                     }
                     _ = flush_ticker.tick() => {
                         if batch.record_count() > 0 {
@@ -410,6 +499,23 @@ quota_size = {quota_size}
     }
 
     #[test]
+    fn defaults_attachments_resend_interval_to_enabled_5_minutes() {
+        let cfg =
+            parse_reduct_remote_config(&build_remote_config("")).expect("parse remote config");
+
+        assert_eq!(cfg.attachments_resend_interval_ms, 300_000);
+    }
+
+    #[test]
+    fn parses_zero_attachments_resend_interval_as_disabled() {
+        let cfg =
+            parse_reduct_remote_config(&build_remote_config("attachments_resend_interval_ms = 0"))
+                .expect("parse remote config");
+
+        assert_eq!(cfg.attachments_resend_interval_ms, 0);
+    }
+
+    #[test]
     fn keeps_legacy_array_of_tables_format_compatible() {
         let cfg = parse_reduct_remote_config(&build_legacy_remote_config(""))
             .expect("parse legacy remote config");
@@ -447,6 +553,7 @@ mod unit_tests {
             batch_max_records: 1,
             batch_max_size_bytes: 1,
             batch_max_interval_ms: 1,
+            attachments_resend_interval_ms: 300_000,
             create_bucket,
         }
     }
@@ -504,16 +611,16 @@ mod unit_tests {
 #[cfg(all(test, feature = "ci"))]
 mod ci_tests {
     use super::{CreateBucketConfig, ReductInstance, RemoteConfig};
-    #[cfg(any(feature = "ros1", feature = "ros2"))]
+    #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
     use crate::message::Attachment;
     use crate::message::{Message, Record};
     use crate::remote::RemoteInstanceLauncher;
     use bytes::Bytes;
     use bytesize::ByteSize;
     use futures_util::StreamExt;
-    use reduct_rs::{QuotaType, ReductClient};
+    use reduct_rs::{ErrorCode, QuotaType, ReductClient};
     use rstest::{fixture, rstest};
-    #[cfg(any(feature = "ros1", feature = "ros2"))]
+    #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
     use serde_json::json;
     use std::collections::HashMap;
     use std::env;
@@ -556,6 +663,7 @@ mod ci_tests {
         url: String,
         bucket: String,
         create_bucket: Option<CreateBucketConfig>,
+        attachments_resend_interval_ms: u64,
     ) -> RemoteConfig {
         RemoteConfig {
             url,
@@ -565,6 +673,7 @@ mod ci_tests {
             batch_max_records: 10,
             batch_max_size_bytes: 1024 * 1024,
             batch_max_interval_ms: 50,
+            attachments_resend_interval_ms,
             create_bucket,
         }
     }
@@ -602,7 +711,7 @@ mod ci_tests {
         })
     }
 
-    #[cfg(any(feature = "ros1", feature = "ros2"))]
+    #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
     #[fixture]
     fn ros_attachment_message() -> Message {
         Message::Attachment(Attachment {
@@ -632,6 +741,7 @@ mod ci_tests {
                 quota_type: QuotaType::FIFO,
                 quota_size: Some(ByteSize(1024 * 1024 * 1024)),
             }),
+            300_000,
         ));
 
         write_data_and_stop(remote, data_message).await;
@@ -670,6 +780,7 @@ mod ci_tests {
                 quota_type: QuotaType::FIFO,
                 quota_size: Some(ByteSize(1024 * 1024 * 1024)),
             }),
+            300_000,
         ));
 
         write_data_and_stop(remote, data_message).await;
@@ -693,7 +804,7 @@ mod ci_tests {
         let url = reductstore_url();
         let _client = reductstore_client().await;
 
-        let remote = ReductInstance::new(remote_config(url, bucket_name, None));
+        let remote = ReductInstance::new(remote_config(url, bucket_name, None, 300_000));
         let err = remote
             .launch()
             .await
@@ -707,7 +818,7 @@ mod ci_tests {
 
     #[rstest]
     #[tokio::test]
-    #[cfg(any(feature = "ros1", feature = "ros2"))]
+    #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
     async fn ci_reductstore_roundtrip_data_and_attachment(
         data_message: Message,
         ros_attachment_message: Message,
@@ -724,7 +835,7 @@ mod ci_tests {
             .await
             .expect("create bucket");
 
-        let remote = ReductInstance::new(remote_config(url, bucket_name.clone(), None));
+        let remote = ReductInstance::new(remote_config(url, bucket_name.clone(), None, 300_000));
 
         let runtime = remote.launch().await.expect("launch remote");
         runtime.tx.send(data_message).await.expect("send data");
@@ -755,5 +866,121 @@ mod ci_tests {
         assert_eq!(payload["encoding"], "ros1");
         assert_eq!(payload["topic"], "/sensor/pos");
         assert_eq!(payload["schema_name"], "geometry_msgs/Point");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
+    async fn ci_reductstore_resends_removed_attachment_when_enabled(
+        ros_attachment_message: Message,
+    ) {
+        let suffix = unique_suffix();
+        let bucket_name = format!("it-{suffix}");
+        let url = reductstore_url();
+        let client = reductstore_client().await;
+
+        client
+            .create_bucket(&bucket_name)
+            .exist_ok(true)
+            .send()
+            .await
+            .expect("create bucket");
+
+        let remote = ReductInstance::new(remote_config(url, bucket_name.clone(), None, 50));
+        let runtime = remote.launch().await.expect("launch remote");
+        runtime
+            .tx
+            .send(ros_attachment_message)
+            .await
+            .expect("send attachment");
+
+        let bucket = client.get_bucket(&bucket_name).await.expect("get bucket");
+        for _ in 0..10 {
+            match bucket.read_attachments("it/entry").await {
+                Ok(attachments) if attachments.contains_key("$ros") => break,
+                Ok(_) => {}
+                Err(err) if err.status() == ErrorCode::NotFound => {}
+                Err(err) => panic!("read attachments: {err:?}"),
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+
+        bucket
+            .remove_attachments("it/entry", None)
+            .await
+            .expect("remove attachments");
+
+        let mut restored = false;
+        for _ in 0..20 {
+            match bucket.read_attachments("it/entry").await {
+                Ok(attachments) if attachments.contains_key("$ros") => {
+                    restored = true;
+                    break;
+                }
+                Ok(_) => {}
+                Err(err) if err.status() == ErrorCode::NotFound => {}
+                Err(err) => panic!("read attachments: {err:?}"),
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+
+        runtime.tx.send(Message::Stop).await.expect("send stop");
+        runtime.task.await.expect("join remote");
+
+        assert!(restored, "expected $ros attachment to be resent");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
+    async fn ci_reductstore_does_not_resend_removed_attachment_when_disabled(
+        ros_attachment_message: Message,
+    ) {
+        let suffix = unique_suffix();
+        let bucket_name = format!("it-{suffix}");
+        let url = reductstore_url();
+        let client = reductstore_client().await;
+
+        client
+            .create_bucket(&bucket_name)
+            .exist_ok(true)
+            .send()
+            .await
+            .expect("create bucket");
+
+        let remote = ReductInstance::new(remote_config(url, bucket_name.clone(), None, 0));
+        let runtime = remote.launch().await.expect("launch remote");
+        runtime
+            .tx
+            .send(ros_attachment_message)
+            .await
+            .expect("send attachment");
+
+        let bucket = client.get_bucket(&bucket_name).await.expect("get bucket");
+        for _ in 0..10 {
+            match bucket.read_attachments("it/entry").await {
+                Ok(attachments) if attachments.contains_key("$ros") => break,
+                Ok(_) => {}
+                Err(err) if err.status() == ErrorCode::NotFound => {}
+                Err(err) => panic!("read attachments: {err:?}"),
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+
+        bucket
+            .remove_attachments("it/entry", None)
+            .await
+            .expect("remove attachments");
+
+        sleep(Duration::from_millis(250)).await;
+
+        runtime.tx.send(Message::Stop).await.expect("send stop");
+        runtime.task.await.expect("join remote");
+
+        match bucket.read_attachments("it/entry").await {
+            Ok(attachments) => assert!(!attachments.contains_key("$ros")),
+            Err(err) if err.status() == ErrorCode::NotFound => {}
+            Err(err) => panic!("read attachments: {err:?}"),
+        }
     }
 }
