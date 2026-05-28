@@ -896,12 +896,11 @@ mod ci_tests {
 
         let bucket = client.get_bucket(&bucket_name).await.expect("get bucket");
         for _ in 0..10 {
-            let attachments = bucket
-                .read_attachments("it/entry")
-                .await
-                .expect("read attachments");
-            if attachments.contains_key("$ros") {
-                break;
+            match bucket.read_attachments("it/entry").await {
+                Ok(attachments) if attachments.contains_key("$ros") => break,
+                Ok(_) => {}
+                Err(err) if err.status() == ErrorCode::NotFound => {}
+                Err(err) => panic!("read attachments: {err:?}"),
             }
             sleep(Duration::from_millis(50)).await;
         }
@@ -913,13 +912,14 @@ mod ci_tests {
 
         let mut restored = false;
         for _ in 0..20 {
-            let attachments = bucket
-                .read_attachments("it/entry")
-                .await
-                .expect("read attachments");
-            if attachments.contains_key("$ros") {
-                restored = true;
-                break;
+            match bucket.read_attachments("it/entry").await {
+                Ok(attachments) if attachments.contains_key("$ros") => {
+                    restored = true;
+                    break;
+                }
+                Ok(_) => {}
+                Err(err) if err.status() == ErrorCode::NotFound => {}
+                Err(err) => panic!("read attachments: {err:?}"),
             }
             sleep(Duration::from_millis(50)).await;
         }
@@ -958,12 +958,11 @@ mod ci_tests {
 
         let bucket = client.get_bucket(&bucket_name).await.expect("get bucket");
         for _ in 0..10 {
-            let attachments = bucket
-                .read_attachments("it/entry")
-                .await
-                .expect("read attachments");
-            if attachments.contains_key("$ros") {
-                break;
+            match bucket.read_attachments("it/entry").await {
+                Ok(attachments) if attachments.contains_key("$ros") => break,
+                Ok(_) => {}
+                Err(err) if err.status() == ErrorCode::NotFound => {}
+                Err(err) => panic!("read attachments: {err:?}"),
             }
             sleep(Duration::from_millis(50)).await;
         }
@@ -978,10 +977,10 @@ mod ci_tests {
         runtime.tx.send(Message::Stop).await.expect("send stop");
         runtime.task.await.expect("join remote");
 
-        let attachments = bucket
-            .read_attachments("it/entry")
-            .await
-            .expect("read attachments");
-        assert!(!attachments.contains_key("$ros"));
+        match bucket.read_attachments("it/entry").await {
+            Ok(attachments) => assert!(!attachments.contains_key("$ros")),
+            Err(err) if err.status() == ErrorCode::NotFound => {}
+            Err(err) => panic!("read attachments: {err:?}"),
+        }
     }
 }
