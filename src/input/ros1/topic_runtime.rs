@@ -13,7 +13,7 @@ pub(super) struct TopicRuntime {
     topic_cfg: Ros1TopicConfig,
     topic_name: String,
     entry_name: String,
-    needs_dynamic_labels: bool,
+    needs_decode: bool,
     decoders: Arc<Mutex<HashMap<String, PublisherDecoder>>>,
     pipeline_tx: Sender<Message>,
 }
@@ -23,14 +23,14 @@ impl TopicRuntime {
         topic_cfg: Ros1TopicConfig,
         topic_name: String,
         entry_name: String,
-        needs_dynamic_labels: bool,
+        needs_decode: bool,
         pipeline_tx: Sender<Message>,
     ) -> Self {
         Self {
             topic_cfg,
             topic_name,
             entry_name,
-            needs_dynamic_labels,
+            needs_decode,
             decoders: Arc::new(Mutex::new(HashMap::new())),
             pipeline_tx,
         }
@@ -39,7 +39,7 @@ impl TopicRuntime {
     pub(super) fn handle_message(&self, raw: RawMessage, publisher_id: &str) {
         let msg_bytes = raw.0;
 
-        let decoded = if self.needs_dynamic_labels {
+        let decoded = if self.needs_decode {
             Ros1Instance::decode_for_labels(
                 &self.decoders,
                 &self.topic_name,
@@ -54,12 +54,13 @@ impl TopicRuntime {
             Some(value) => Ros1Instance::build_labels(value, &self.topic_cfg.labels),
             None => Ros1Instance::build_static_labels(&self.topic_cfg.labels),
         };
+        let timestamp_us = decoded
+            .as_ref()
+            .and_then(|value| Ros1Instance::resolve_timestamp(value, &self.topic_cfg))
+            .unwrap_or_else(current_timestamp_us);
 
         let record = Record {
-            timestamp_us: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_micros() as u64,
+            timestamp_us,
             entry_name: self.entry_name.clone(),
             content: msg_bytes.into(),
             content_type: Some(Ros1Instance::default_content_type().to_string()),
@@ -112,7 +113,7 @@ impl TopicRuntime {
             );
         }
 
-        if !self.needs_dynamic_labels {
+        if !self.needs_decode {
             return;
         }
 
@@ -141,6 +142,13 @@ impl TopicRuntime {
     }
 }
 
+fn current_timestamp_us() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::TopicRuntime;
@@ -159,6 +167,7 @@ mod tests {
             labels: vec![Ros1LabelRule::Static {
                 r#static: HashMap::from([("source".to_string(), "ros1".to_string())]),
             }],
+            timestamp: None,
         }
     }
 

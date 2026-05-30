@@ -59,6 +59,7 @@ impl InputLauncher for Ros1Instance {
             {
                 bail!("ROS topic entry_name must not be empty");
             }
+            validate_timestamp_mapping(topic_cfg)?;
         }
 
         let subscribers = tokio::task::spawn_blocking({
@@ -82,12 +83,13 @@ impl InputLauncher for Ros1Instance {
                         .entry_name
                         .clone()
                         .unwrap_or_else(|| topic_name.clone());
-                    let needs_dynamic_labels = Ros1Instance::has_dynamic_labels(&topic_cfg.labels);
+                    let needs_decode = Ros1Instance::has_dynamic_labels(&topic_cfg.labels)
+                        || Ros1Instance::has_timestamp_field(&topic_cfg);
                     let runtime = TopicRuntime::new(
                         topic_cfg.clone(),
                         topic_name.clone(),
                         entry_name,
-                        needs_dynamic_labels,
+                        needs_decode,
                         pipeline_tx.clone(),
                     );
 
@@ -151,4 +153,41 @@ impl InputLauncher for Ros1Instance {
 
         Ok(ComponentRuntime { tx, task })
     }
+}
+
+fn validate_timestamp_mapping(topic: &Ros1TopicConfig) -> Result<(), Error> {
+    let Some(timestamp) = &topic.timestamp else {
+        return Ok(());
+    };
+
+    if timestamp.source_count() != 1 {
+        bail!(
+            "ROS topic '{}' timestamp must define exactly one 'field'",
+            topic.name
+        );
+    }
+    if timestamp.property.is_some() {
+        bail!(
+            "ROS topic '{}' timestamp.property is not supported",
+            topic.name
+        );
+    }
+    if timestamp.header.is_some() {
+        bail!(
+            "ROS topic '{}' timestamp.header is not supported",
+            topic.name
+        );
+    }
+    if timestamp
+        .field
+        .as_ref()
+        .is_some_and(|field| field.trim().is_empty())
+    {
+        bail!(
+            "ROS topic '{}' timestamp.field must not be empty",
+            topic.name
+        );
+    }
+
+    Ok(())
 }

@@ -43,6 +43,10 @@ labels = [
   { field = "data", label = "message" },
   { static = { source = "ros1" } }
 ]
+
+# Optional timestamp mapping. If extraction fails, ingest time is used.
+# For standard ROS headers, use header.stamp with ros_stamp format.
+timestamp = { field = "header.stamp", format = "ros_stamp" }
 ```
 
 ## Build
@@ -58,6 +62,8 @@ cargo build --no-default-features --features ros1
 - Empty topic names are not allowed.
 - `entry_name` cannot be empty when explicitly set.
 - Message schema metadata is stored automatically for ROS topics.
+
+**Performance:** Configuring `timestamp = { field = "..." }` enables dynamic message decoding for each message, which may increase CPU usage. If you already use field-based label rules, no additional cost is incurred since the decoded payload is shared.
 
 ## Changes
 

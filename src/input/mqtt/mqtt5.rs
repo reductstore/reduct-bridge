@@ -1,7 +1,8 @@
 use super::{
-    BrokerScheme, MqttConfig, ParsedBroker, PropertyLabelResolver, build_record_labels,
-    current_timestamp_us, emit_attachment, ensure_rustls_crypto_provider, find_topic_config,
-    reconnect_retry_delay, resolve_entry_name,
+    BrokerScheme, MqttConfig, ParsedBroker, PropertyLabelResolver,
+    build_record_labels_with_decoded, current_timestamp_us, decode_payload_for_record,
+    emit_attachment, ensure_rustls_crypto_provider, find_topic_config, reconnect_retry_delay,
+    resolve_entry_name, resolve_record_timestamp,
 };
 use crate::formats::FormatHandler;
 use crate::message::{Message, Record};
@@ -80,9 +81,23 @@ pub(super) fn build_v5_record(
     let topic_cfg = find_topic_config(cfg, &publish_topic)
         .expect("received MQTT v5 publish for unsubscribed topic");
     let property_resolver = V5PropertyResolver::new(publish);
+    let decoded_payload = decode_payload_for_record(topic_cfg, publish.payload.as_ref(), format);
+    let labels = build_record_labels_with_decoded(
+        topic_cfg,
+        publish.payload.as_ref(),
+        decoded_payload.as_ref(),
+        Some(&property_resolver),
+        format,
+    );
+    let timestamp_us = resolve_record_timestamp(
+        topic_cfg,
+        decoded_payload.as_ref(),
+        Some(&property_resolver),
+    )
+    .unwrap_or_else(current_timestamp_us);
 
     Record {
-        timestamp_us: current_timestamp_us(),
+        timestamp_us,
         entry_name: resolve_entry_name(&cfg.entry_prefix, topic_cfg, &publish_topic),
         content: publish.payload.clone(),
         content_type: publish
@@ -90,12 +105,7 @@ pub(super) fn build_v5_record(
             .as_ref()
             .and_then(|props| props.content_type.clone())
             .or_else(|| topic_cfg.content_type.clone()),
-        labels: build_record_labels(
-            topic_cfg,
-            publish.payload.as_ref(),
-            Some(&property_resolver),
-            format,
-        ),
+        labels,
     }
 }
 
