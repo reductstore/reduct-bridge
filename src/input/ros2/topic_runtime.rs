@@ -73,10 +73,20 @@ impl Ros2TopicRuntime {
             Some(message) => Ros2Instance::build_labels(message, &self.labels_cfg),
             None => Ros2Instance::build_static_labels(&self.labels_cfg),
         };
-        let timestamp_us = decoded
+        let timestamp_us = match decoded
             .as_ref()
-            .and_then(Ros2Instance::extract_header_timestamp_us)
-            .unwrap_or(fallback_timestamp_us);
+            .map(Ros2Instance::extract_header_timestamp_us)
+        {
+            Some(Ok(timestamp_us)) => timestamp_us,
+            Some(Err(err)) => {
+                warn!(
+                    "ROS2 timestamp mapping failed for topic '{}': {}; using fallback timestamp",
+                    self.topic_name, err
+                );
+                fallback_timestamp_us
+            }
+            None => fallback_timestamp_us,
+        };
 
         let record = Record {
             timestamp_us,

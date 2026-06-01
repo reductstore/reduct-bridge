@@ -16,7 +16,10 @@ use crate::formats::{DecodeFormat, FormatHandler, PayloadFormatHandler};
 use crate::input::InputLauncher;
 use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
-use crate::timestamp::{TimestampMapping, resolve_from_json, resolve_from_string};
+use crate::timestamp::{
+    TimeResolutionError, TimeResolutionResult, TimestampMapping, resolve_from_json,
+    resolve_from_string,
+};
 use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
@@ -231,19 +234,35 @@ impl HttpInstance {
         headers: &HeaderMap,
         decoded_payload: Option<&Value>,
         cfg: &HttpConfig,
-    ) -> Option<u64> {
+    ) -> Option<TimeResolutionResult> {
         let timestamp = cfg.timestamp.as_ref()?;
 
         if let Some(field) = timestamp.field.as_deref() {
-            return decoded_payload
-                .and_then(|payload| resolve_from_json(payload, field, &timestamp.format));
+            return Some(
+                decoded_payload
+                    .map(|payload| resolve_from_json(payload, field, &timestamp.format))
+                    .unwrap_or_else(|| Err(TimeResolutionError::resolution_failed("field", field))),
+            );
         }
 
         if let Some(header) = timestamp.header.as_deref() {
-            return headers
-                .get(header)
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| resolve_from_string(value, &timestamp.format));
+            let Some(value) = headers.get(header) else {
+                return Some(Err(TimeResolutionError::resolution_failed(
+                    "header", header,
+                )));
+            };
+            return Some(
+                value
+                    .to_str()
+                    .map(|value| resolve_from_string(value, "header", header, &timestamp.format))
+                    .unwrap_or_else(|_| {
+                        Err(TimeResolutionError::parsing_failed(
+                            "header",
+                            header,
+                            &timestamp.format,
+                        ))
+                    }),
+            );
         }
 
         None
@@ -267,8 +286,17 @@ impl HttpInstance {
             .await
             .map_err(|err| anyhow::anyhow!("Failed to read HTTP response body: {}", err))?;
         let decoded_payload = Self::decode_payload_for_labels(cfg, &headers, &content, &format);
-        let timestamp_us = Self::resolve_timestamp(&headers, decoded_payload.as_ref(), cfg)
-            .unwrap_or_else(current_timestamp_us);
+        let timestamp_us = match Self::resolve_timestamp(&headers, decoded_payload.as_ref(), cfg) {
+            Some(Ok(timestamp_us)) => timestamp_us,
+            Some(Err(err)) => {
+                warn!(
+                    "HTTP timestamp mapping failed for '{}': {}; using ingest time",
+                    cfg.url, err
+                );
+                current_timestamp_us()
+            }
+            None => current_timestamp_us(),
+        };
 
         Ok(Record {
             timestamp_us,

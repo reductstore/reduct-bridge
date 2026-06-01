@@ -1,6 +1,7 @@
 use super::instance::PublisherDecoder;
 use super::{Ros1Instance, Ros1TopicConfig};
 use crate::message::{Attachment, Message, Record};
+use crate::timestamp::TimeResolutionError;
 use log::warn;
 use rosrust::{DynamicMsg, RawMessage};
 use std::collections::HashMap;
@@ -54,10 +55,33 @@ impl TopicRuntime {
             Some(value) => Ros1Instance::build_labels(value, &self.topic_cfg.labels),
             None => Ros1Instance::build_static_labels(&self.topic_cfg.labels),
         };
-        let timestamp_us = decoded
-            .as_ref()
-            .and_then(|value| Ros1Instance::resolve_timestamp(value, &self.topic_cfg))
-            .unwrap_or_else(current_timestamp_us);
+        let timestamp_us = match decoded.as_ref() {
+            Some(value) => match Ros1Instance::resolve_timestamp(value, &self.topic_cfg) {
+                Some(Ok(timestamp_us)) => timestamp_us,
+                Some(Err(err)) => {
+                    warn!(
+                        "ROS timestamp mapping failed for topic '{}': {}; using ingest time",
+                        self.topic_name, err
+                    );
+                    current_timestamp_us()
+                }
+                None => current_timestamp_us(),
+            },
+            None => self
+                .topic_cfg
+                .timestamp
+                .as_ref()
+                .and_then(|timestamp| timestamp.field.as_deref())
+                .map(|field| TimeResolutionError::resolution_failed("field", field))
+                .map(|err| {
+                    warn!(
+                        "ROS timestamp mapping failed for topic '{}': {}; using ingest time",
+                        self.topic_name, err
+                    );
+                    current_timestamp_us()
+                })
+                .unwrap_or_else(current_timestamp_us),
+        };
 
         let record = Record {
             timestamp_us,

@@ -1,6 +1,6 @@
 use crate::formats::json::{extract_json_path, value_to_label};
 use crate::formats::ros1::msg_to_json;
-use crate::timestamp::{TimestampMapping, resolve_from_json};
+use crate::timestamp::{TimeResolutionResult, TimestampMapping, resolve_from_json};
 use anyhow::{Error, anyhow, bail};
 use log::warn;
 use rosrust::DynamicMsg;
@@ -101,11 +101,14 @@ impl Ros1Instance {
             .is_some_and(TimestampMapping::has_field)
     }
 
-    pub(super) fn resolve_timestamp(message: &Value, topic: &Ros1TopicConfig) -> Option<u64> {
+    pub(super) fn resolve_timestamp(
+        message: &Value,
+        topic: &Ros1TopicConfig,
+    ) -> Option<TimeResolutionResult> {
         let timestamp = topic.timestamp.as_ref()?;
         let field = timestamp.field.as_deref()?;
 
-        resolve_from_json(message, field, &timestamp.format)
+        Some(resolve_from_json(message, field, &timestamp.format))
     }
 
     pub(super) fn try_init_ros(node_name: &str, master_uri: &str) -> Result<(), Error> {
@@ -297,7 +300,7 @@ mod tests {
         assert!(Ros1Instance::has_timestamp_field(&topic));
         assert_eq!(
             Ros1Instance::resolve_timestamp(&message, &topic),
-            Some(42_123_456)
+            Some(Ok(42_123_456))
         );
     }
 

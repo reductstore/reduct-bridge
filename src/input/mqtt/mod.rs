@@ -22,7 +22,10 @@ use crate::formats::{
 use crate::input::InputLauncher;
 use crate::message::{Attachment, Message};
 use crate::runtime::ComponentRuntime;
-use crate::timestamp::{TimestampMapping, resolve_from_json, resolve_from_string};
+use crate::timestamp::{
+    TimeResolutionError, TimeResolutionResult, TimestampMapping, resolve_from_json,
+    resolve_from_string,
+};
 use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
 use log::{info, warn};
@@ -607,18 +610,26 @@ pub(super) fn resolve_record_timestamp(
     topic_cfg: &MqttTopicConfig,
     decoded_payload: Option<&Value>,
     property_resolver: Option<&dyn PropertyLabelResolver>,
-) -> Option<u64> {
+) -> Option<TimeResolutionResult> {
     let timestamp = topic_cfg.timestamp.as_ref()?;
 
     if let Some(field) = timestamp.field.as_deref() {
-        return decoded_payload
-            .and_then(|payload| resolve_from_json(payload, field, &timestamp.format));
+        return Some(
+            decoded_payload
+                .map(|payload| resolve_from_json(payload, field, &timestamp.format))
+                .unwrap_or_else(|| Err(TimeResolutionError::resolution_failed("field", field))),
+        );
     }
 
     if let Some(property) = timestamp.property.as_deref() {
-        return property_resolver
-            .and_then(|resolver| resolver.resolve_property(property))
-            .and_then(|value| resolve_from_string(&value, &timestamp.format));
+        return Some(
+            property_resolver
+                .and_then(|resolver| resolver.resolve_property(property))
+                .map(|value| resolve_from_string(&value, "property", property, &timestamp.format))
+                .unwrap_or_else(|| {
+                    Err(TimeResolutionError::resolution_failed("property", property))
+                }),
+        );
     }
 
     None

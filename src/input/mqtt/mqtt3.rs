@@ -56,8 +56,17 @@ pub(super) fn build_v3_record(
         None,
         format,
     );
-    let timestamp_us = resolve_record_timestamp(topic_cfg, decoded_payload.as_ref(), None)
-        .unwrap_or_else(current_timestamp_us);
+    let timestamp_us = match resolve_record_timestamp(topic_cfg, decoded_payload.as_ref(), None) {
+        Some(Ok(timestamp_us)) => timestamp_us,
+        Some(Err(err)) => {
+            warn!(
+                "MQTT timestamp mapping failed for topic '{}': {}; using ingest time",
+                publish.topic, err
+            );
+            current_timestamp_us()
+        }
+        None => current_timestamp_us(),
+    };
 
     Record {
         timestamp_us,
