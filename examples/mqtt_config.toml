@@ -12,15 +12,15 @@ bucket = "my-bucket"
 prefix = ""
 # Optional: create the bucket on startup if it does not exist.
 # Omit this table to require the bucket to exist before starting reduct-bridge.
- [remotes.reduct.local.create_bucket]
- quota_type = "FIFO" # optional, defaults to NONE; valid: NONE, FIFO, HARD
- quota_size = "1GB" # required only for FIFO/HARD; also accepts raw bytes, MB/GB/TB, or MiB/GiB/TiB
+# [remotes.reduct.local.create_bucket]
+# quota_type = "FIFO" # optional, defaults to NONE; valid: NONE, FIFO, HARD
+# quota_size = "1GB" # required only for FIFO/HARD; also accepts raw bytes, MB/GB/TB, or MiB/GiB/TiB
 
 
 # MQTT v5 input configuration.
 # Structure: [inputs.mqtt.<input_name>]
 [inputs.mqtt.main]
-broker = "mqtt://127.0.0.1:1883"
+broker = "mqtts://broker.example.com:8883"
 client_id = "reduct-bridge"
 version = "v5"
 qos = 1
@@ -31,12 +31,12 @@ password = "${MQTT_PASSWORD}"
 entry_prefix = "/mqtt"
 
 [[inputs.mqtt.main.topics]]
-name = "drift/opcua"
+name = "factory/+/telemetry"
 entry_name = "telemetry"
 content_type = "application/json"
 # Optional timestamp mapping from a payload field. If extraction fails, ingest time is used.
 # Supported formats: unix_s, unix_ms, unix_us, unix_ns, iso8601, ros_stamp.
-timestamp = { field = "id", format = "unix_ms" }
+timestamp = { field = "event_time", format = "unix_ms" }
 # Optional label rules (default = []):
 # 1) Dynamic field label:
 #    { field = "device_id", label = "device" }
@@ -45,43 +45,43 @@ timestamp = { field = "id", format = "unix_ms" }
 # 3) MQTT v5 property label:
 #    { property = "content_type", label = "mime" }
 #    { property = "tenant", label = "tenant" }  # MQTT v5 user property
-#labels = [
-#  { field = "device_id", label = "device" },
-#  { field = "site", label = "site" },
-#  { static = { source = "mqtt" } },
-#  { property = "content_type", label = "mime" },
-#  { property = "tenant", label = "tenant" }
-#]
+labels = [
+  { field = "device_id", label = "device" },
+  { field = "site", label = "site" },
+  { static = { source = "mqtt" } },
+  { property = "content_type", label = "mime" },
+  { property = "tenant", label = "tenant" }
+]
 
-#[[inputs.mqtt.main.topics]]
-#name = "factory/+/events"
-## MQTT v5 user properties can also be used as timestamp sources.
-## timestamp = { property = "event_time", format = "unix_us" }
-#labels = [
-#  { static = { source = "mqtt-events" } }
-#]
+[[inputs.mqtt.main.topics]]
+name = "factory/+/events"
+# MQTT v5 user properties can also be used as timestamp sources.
+# timestamp = { property = "event_time", format = "unix_us" }
+labels = [
+  { static = { source = "mqtt-events" } }
+]
 
 
-## MQTT v3 input configuration.
-#[inputs.mqtt.legacy]
-#broker = "mqtt://broker.example.com:1883"
-#client_id = "reduct-bridge-legacy"
-#version = "v3"
-#qos = 0
-#
-#username = "legacy_user"
-#password = "${LEGACY_MQTT_PASSWORD}"
-#
-#entry_prefix = "/mqtt"
-#
-#[[inputs.mqtt.legacy.topics]]
-#name = "legacy/+/data"
-#entry_name = "legacy"
-#content_type = "application/json"
-#labels = [
-#  { field = "line", label = "line" },
-#  { static = { source = "mqtt-v3" } }
-#]
+# MQTT v3 input configuration.
+[inputs.mqtt.legacy]
+broker = "mqtt://broker.example.com:1883"
+client_id = "reduct-bridge-legacy"
+version = "v3"
+qos = 0
+
+username = "legacy_user"
+password = "${LEGACY_MQTT_PASSWORD}"
+
+entry_prefix = "/mqtt"
+
+[[inputs.mqtt.legacy.topics]]
+name = "legacy/+/data"
+entry_name = "legacy"
+content_type = "application/json"
+labels = [
+  { field = "line", label = "line" },
+  { static = { source = "mqtt-v3" } }
+]
 
 
 # Pipelines
@@ -89,6 +89,6 @@ timestamp = { field = "id", format = "unix_ms" }
 remote = "local"
 inputs = ["main"]
 
-#[pipelines.mqtt_v3_pipeline]
-#remote = "local"
-#inputs = ["legacy"]
+[pipelines.mqtt_v3_pipeline]
+remote = "local"
+inputs = ["legacy"]
