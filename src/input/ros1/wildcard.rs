@@ -129,6 +129,7 @@ mod tests {
             name: name.to_string(),
             entry_name: Some(entry_name.to_string()),
             labels: Vec::new(),
+            timestamp: None,
         }
     }
 

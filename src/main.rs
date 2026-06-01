@@ -19,6 +19,7 @@ mod message;
 mod pipeline;
 mod remote;
 mod runtime;
+mod timestamp;
 
 use crate::cfg::parse_config_file;
 use crate::input::InputBuilder;

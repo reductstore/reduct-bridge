@@ -16,6 +16,10 @@ use crate::formats::{DecodeFormat, FormatHandler, PayloadFormatHandler};
 use crate::input::InputLauncher;
 use crate::message::{Message, Record};
 use crate::runtime::ComponentRuntime;
+use crate::timestamp::{
+    TimeResolutionError, TimeResolutionResult, TimestampMapping, resolve_from_json,
+    resolve_from_string,
+};
 use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
@@ -43,6 +47,8 @@ pub struct HttpConfig {
     pub basic_auth: Option<HttpBasicAuthConfig>,
     #[serde(default)]
     pub labels: Vec<HttpLabelRule>,
+    #[serde(default)]
+    pub timestamp: Option<TimestampMapping>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -70,10 +76,14 @@ impl HttpInstance {
         Self { cfg }
     }
 
-    fn needs_body_decode(rules: &[HttpLabelRule]) -> bool {
-        rules
+    fn needs_body_decode(cfg: &HttpConfig) -> bool {
+        cfg.labels
             .iter()
             .any(|rule| matches!(rule, HttpLabelRule::Field { .. }))
+            || cfg
+                .timestamp
+                .as_ref()
+                .is_some_and(TimestampMapping::has_field)
     }
 
     fn validate_config(cfg: &HttpConfig) -> Result<()> {
@@ -109,6 +119,44 @@ impl HttpInstance {
                 bail!("HTTP input basic_auth.password must not be empty");
             }
         }
+        Self::validate_timestamp_mapping(cfg)?;
+        Ok(())
+    }
+
+    fn validate_timestamp_mapping(cfg: &HttpConfig) -> Result<()> {
+        let Some(timestamp) = &cfg.timestamp else {
+            return Ok(());
+        };
+
+        if timestamp.source_count() != 1 {
+            bail!("HTTP input timestamp must define exactly one of 'field' or 'header'");
+        }
+        if timestamp.property.is_some() {
+            bail!("HTTP input timestamp.property is not supported");
+        }
+        if timestamp
+            .field
+            .as_ref()
+            .is_some_and(|field| field.trim().is_empty())
+        {
+            bail!("HTTP input timestamp.field must not be empty");
+        }
+        if timestamp
+            .header
+            .as_ref()
+            .is_some_and(|header| header.trim().is_empty())
+        {
+            bail!("HTTP input timestamp.header must not be empty");
+        }
+        if timestamp.field.is_some()
+            && cfg
+                .content_type
+                .as_ref()
+                .is_some_and(|content_type| !is_json_content_type(content_type))
+        {
+            bail!("HTTP input timestamp.field requires JSON content_type");
+        }
+
         Ok(())
     }
 
@@ -149,7 +197,7 @@ impl HttpInstance {
         cfg: &'a HttpConfig,
         headers: &'a HeaderMap,
     ) -> Option<DecodeFormat<'a>> {
-        if !Self::needs_body_decode(&cfg.labels) {
+        if !Self::needs_body_decode(cfg) {
             return None;
         }
 
@@ -182,6 +230,44 @@ impl HttpInstance {
         })
     }
 
+    fn resolve_timestamp(
+        headers: &HeaderMap,
+        decoded_payload: Option<&Value>,
+        cfg: &HttpConfig,
+    ) -> Option<TimeResolutionResult> {
+        let timestamp = cfg.timestamp.as_ref()?;
+
+        if let Some(field) = timestamp.field.as_deref() {
+            return Some(
+                decoded_payload
+                    .map(|payload| resolve_from_json(payload, field, &timestamp.format))
+                    .unwrap_or_else(|| Err(TimeResolutionError::resolution_failed("field", field))),
+            );
+        }
+
+        if let Some(header) = timestamp.header.as_deref() {
+            let Some(value) = headers.get(header) else {
+                return Some(Err(TimeResolutionError::resolution_failed(
+                    "header", header,
+                )));
+            };
+            return Some(
+                value
+                    .to_str()
+                    .map(|value| resolve_from_string(value, "header", header, &timestamp.format))
+                    .unwrap_or_else(|_| {
+                        Err(TimeResolutionError::parsing_failed(
+                            "header",
+                            header,
+                            &timestamp.format,
+                        ))
+                    }),
+            );
+        }
+
+        None
+    }
+
     async fn poll_once(client: &reqwest::Client, cfg: &HttpConfig) -> Result<Record> {
         let response = build_request(client, cfg)
             .send()
@@ -200,7 +286,17 @@ impl HttpInstance {
             .await
             .map_err(|err| anyhow::anyhow!("Failed to read HTTP response body: {}", err))?;
         let decoded_payload = Self::decode_payload_for_labels(cfg, &headers, &content, &format);
-        let timestamp_us = current_timestamp_us();
+        let timestamp_us = match Self::resolve_timestamp(&headers, decoded_payload.as_ref(), cfg) {
+            Some(Ok(timestamp_us)) => timestamp_us,
+            Some(Err(err)) => {
+                warn!(
+                    "HTTP timestamp mapping failed for '{}': {}; using ingest time",
+                    cfg.url, err
+                );
+                current_timestamp_us()
+            }
+            None => current_timestamp_us(),
+        };
 
         Ok(Record {
             timestamp_us,
@@ -274,6 +370,14 @@ fn current_timestamp_us() -> u64 {
         .as_micros() as u64
 }
 
+fn is_json_content_type(content_type: &str) -> bool {
+    let Some(media_type) = content_type.split(';').next() else {
+        return false;
+    };
+    let media_type = media_type.trim().to_ascii_lowercase();
+    media_type == "application/json" || media_type.ends_with("+json")
+}
+
 fn create_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .build()
@@ -298,6 +402,7 @@ mod tests {
     use crate::formats::DecodeFormat;
     use crate::input::InputLauncher;
     use crate::message::Message;
+    use crate::timestamp::{TimestampFormat, TimestampMapping};
     use reqwest::header::{CONTENT_TYPE, ETAG, HeaderMap, HeaderValue};
     use rstest::{fixture, rstest};
     use serde_json::json;
@@ -329,6 +434,7 @@ mod tests {
             bearer_token: None,
             basic_auth: None,
             labels: Vec::new(),
+            timestamp: None,
         }
     }
 
@@ -377,6 +483,7 @@ mod tests {
         assert_eq!(cfg.entry_name, "http/data");
         assert!(cfg.content_type.is_none());
         assert!(cfg.labels.is_empty());
+        assert!(cfg.timestamp.is_none());
     }
 
     #[rstest]
@@ -514,6 +621,56 @@ mod tests {
             .to_string();
 
         assert!(err.contains(expected_error));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn poll_once_uses_json_field_timestamp(mut http_cfg: HttpConfig) {
+        let server = spawn_server(|_request| {
+            let body = r#"{"metadata":{"timestamp":1500}}"#;
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+        });
+        http_cfg.url = format!("http://{}/metrics", server.address);
+        http_cfg.timestamp = Some(TimestampMapping {
+            field: Some("metadata.timestamp".to_string()),
+            property: None,
+            header: None,
+            format: TimestampFormat::UnixMs,
+        });
+
+        let record = HttpInstance::poll_once(&create_client().unwrap(), &http_cfg)
+            .await
+            .unwrap();
+
+        assert_eq!(record.timestamp_us, 1_500_000);
+        server.join();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn poll_once_uses_response_header_timestamp(mut http_cfg: HttpConfig) {
+        let server = spawn_server(|_request| {
+            "HTTP/1.1 200 OK\r\nX-Event-Time: 1970-01-01T00:00:01.500Z\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+                .to_string()
+        });
+        http_cfg.url = format!("http://{}/metrics", server.address);
+        http_cfg.timestamp = Some(TimestampMapping {
+            field: None,
+            property: None,
+            header: Some("x-event-time".to_string()),
+            format: TimestampFormat::Iso8601,
+        });
+
+        let record = HttpInstance::poll_once(&create_client().unwrap(), &http_cfg)
+            .await
+            .unwrap();
+
+        assert_eq!(record.timestamp_us, 1_500_000);
+        server.join();
     }
 
     #[rstest]

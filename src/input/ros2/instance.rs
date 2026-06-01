@@ -3,6 +3,7 @@ use super::wildcard;
 use crate::formats::json::{extract_json_path, value_to_label};
 use crate::formats::ros2::Ros2DynamicParser;
 use crate::message::Message;
+use crate::timestamp::{TimeResolutionResult, TimestampFormat, resolve_from_json};
 use anyhow::{Error, anyhow, bail};
 use log::{info, warn};
 use rclrs::{
@@ -361,12 +362,8 @@ impl Ros2Instance {
         )
     }
 
-    pub(super) fn extract_header_timestamp_us(message: &Value) -> Option<u64> {
-        let header = message.get("header")?;
-        let stamp = header.get("stamp")?;
-        let sec = stamp.get("sec")?.as_u64()?;
-        let nanosec = stamp.get("nanosec")?.as_u64()?;
-        Some(sec * 1_000_000 + nanosec / 1_000)
+    pub(super) fn extract_header_timestamp_us(message: &Value) -> TimeResolutionResult {
+        resolve_from_json(message, "header.stamp", &TimestampFormat::RosStamp)
     }
 
     pub(super) fn message_info_timestamp_us(info: &MessageInfo) -> u64 {
@@ -675,7 +672,7 @@ mod tests {
     #[rstest]
     fn extract_header_timestamp_uses_ros_header_stamp(decoded_message: serde_json::Value) {
         let ts = Ros2Instance::extract_header_timestamp_us(&decoded_message);
-        assert_eq!(ts, Some(12_003_456));
+        assert_eq!(ts, Ok(12_003_456));
     }
 
     #[rstest]

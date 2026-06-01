@@ -24,6 +24,11 @@ entry_name = "http/metrics"
 # If omitted, the response Content-Type header is used when available.
 content_type = "application/json"
 
+# Optional timestamp mapping. If extraction fails, ingest time is used.
+# Use either a JSON field or a response header.
+timestamp = { field = "metadata.timestamp", format = "unix_ms" }
+# timestamp = { header = "x-event-time", format = "iso8601" }
+
 # Optional bearer token authentication.
 bearer_token = "${HTTP_TOKEN}"
 
@@ -72,6 +77,8 @@ password = "${HTTP_PASSWORD}"
 - Failed requests and non-success HTTP statuses skip that polling cycle.
 - `entry_name` cannot be empty.
 - `repeat_interval` must be greater than zero.
+
+**Performance:** Configuring `timestamp = { field = "..." }` enables payload decoding for each message, which may increase CPU usage. If you already use field-based label rules, no additional cost is incurred since the decoded payload is shared.
 
 ## Build
 

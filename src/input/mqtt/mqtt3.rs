@@ -1,7 +1,7 @@
 use super::{
-    BrokerScheme, MqttConfig, ParsedBroker, build_record_labels, current_timestamp_us,
-    emit_attachment, ensure_rustls_crypto_provider, find_topic_config, reconnect_retry_delay,
-    resolve_entry_name,
+    BrokerScheme, MqttConfig, ParsedBroker, build_record_labels_with_decoded, current_timestamp_us,
+    decode_payload_for_record, emit_attachment, ensure_rustls_crypto_provider, find_topic_config,
+    reconnect_retry_delay, resolve_entry_name, resolve_record_timestamp,
 };
 use crate::formats::FormatHandler;
 use crate::message::{Message, Record};
@@ -48,13 +48,32 @@ pub(super) fn build_v3_record(
 ) -> Record {
     let topic_cfg = find_topic_config(cfg, &publish.topic)
         .expect("received MQTT v3 publish for unsubscribed topic");
+    let decoded_payload = decode_payload_for_record(topic_cfg, publish.payload.as_ref(), format);
+    let labels = build_record_labels_with_decoded(
+        topic_cfg,
+        publish.payload.as_ref(),
+        decoded_payload.as_ref(),
+        None,
+        format,
+    );
+    let timestamp_us = match resolve_record_timestamp(topic_cfg, decoded_payload.as_ref(), None) {
+        Some(Ok(timestamp_us)) => timestamp_us,
+        Some(Err(err)) => {
+            warn!(
+                "MQTT timestamp mapping failed for topic '{}': {}; using ingest time",
+                publish.topic, err
+            );
+            current_timestamp_us()
+        }
+        None => current_timestamp_us(),
+    };
 
     Record {
-        timestamp_us: current_timestamp_us(),
+        timestamp_us,
         entry_name: resolve_entry_name(&cfg.entry_prefix, topic_cfg, &publish.topic),
         content: publish.payload.clone(),
         content_type: topic_cfg.content_type.clone(),
-        labels: build_record_labels(topic_cfg, publish.payload.as_ref(), None, format),
+        labels,
     }
 }
 

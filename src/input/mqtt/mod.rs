@@ -22,6 +22,10 @@ use crate::formats::{
 use crate::input::InputLauncher;
 use crate::message::{Attachment, Message};
 use crate::runtime::ComponentRuntime;
+use crate::timestamp::{
+    TimeResolutionError, TimeResolutionResult, TimestampMapping, resolve_from_json,
+    resolve_from_string,
+};
 use anyhow::{Error, Result, bail};
 use async_trait::async_trait;
 use log::{info, warn};
@@ -72,6 +76,8 @@ pub struct MqttTopicConfig {
     pub schema_name: Option<String>,
     #[serde(default)]
     pub labels: Vec<MqttLabelRule>,
+    #[serde(default)]
+    pub timestamp: Option<TimestampMapping>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -163,6 +169,14 @@ impl MqttInstance {
             {
                 bail!("MQTT v3 input does not support property label rules");
             }
+            if matches!(cfg.version, MqttVersion::V3)
+                && topic
+                    .timestamp
+                    .as_ref()
+                    .is_some_and(|timestamp| timestamp.property.is_some())
+            {
+                bail!("MQTT v3 input does not support timestamp property mapping");
+            }
             if topic.schema_path.is_some() != topic.schema_name.is_some() {
                 bail!(
                     "MQTT topic '{}': schema_path and schema_name must both be set or both omitted",
@@ -170,6 +184,7 @@ impl MqttInstance {
                 );
             }
             let payload_format = payload_format_for_topic(topic);
+            Self::validate_timestamp_mapping(&topic.name, topic, payload_format)?;
             Self::validate_topic_payload_format(&topic.name, topic, payload_format)?;
             for rule in &topic.labels {
                 Self::validate_field_label_rule(&topic.name, rule)?;
@@ -188,6 +203,72 @@ impl MqttInstance {
 
         if cfg.password.is_some() && cfg.username.is_none() {
             bail!("MQTT input password requires username to be set");
+        }
+
+        Ok(())
+    }
+
+    fn validate_timestamp_mapping(
+        topic_name: &str,
+        topic: &MqttTopicConfig,
+        payload_format: PayloadFormat,
+    ) -> Result<()> {
+        let Some(timestamp) = &topic.timestamp else {
+            return Ok(());
+        };
+
+        if timestamp.source_count() != 1 {
+            bail!(
+                "MQTT topic '{}': timestamp must define exactly one of 'field' or 'property'",
+                topic_name
+            );
+        }
+        if timestamp.header.is_some() {
+            bail!(
+                "MQTT topic '{}': timestamp.header is not supported",
+                topic_name
+            );
+        }
+        if timestamp
+            .field
+            .as_ref()
+            .is_some_and(|field| field.trim().is_empty())
+        {
+            bail!(
+                "MQTT topic '{}': timestamp.field must not be empty",
+                topic_name
+            );
+        }
+        if timestamp
+            .property
+            .as_ref()
+            .is_some_and(|property| property.trim().is_empty())
+        {
+            bail!(
+                "MQTT topic '{}': timestamp.property must not be empty",
+                topic_name
+            );
+        }
+        if timestamp.property.as_deref() == Some("content_type") {
+            bail!(
+                "MQTT topic '{}': timestamp.property must reference an MQTT v5 user property",
+                topic_name
+            );
+        }
+
+        if timestamp.field.is_some() {
+            match payload_format {
+                PayloadFormat::Json => {}
+                PayloadFormat::Protobuf if topic.schema_path.is_some() => {}
+                PayloadFormat::Protobuf => bail!(
+                    "MQTT topic '{}': protobuf timestamp.field requires schema_path/schema_name",
+                    topic_name
+                ),
+                PayloadFormat::None => bail!(
+                    "MQTT topic '{}': timestamp.field requires JSON or protobuf content_type",
+                    topic_name
+                ),
+            }
         }
 
         Ok(())
@@ -334,6 +415,17 @@ fn topic_uses_decode_labels(topic: &MqttTopicConfig) -> bool {
         .any(|rule| matches!(rule, MqttLabelRule::Field { .. }))
 }
 
+fn topic_uses_decoded_payload(topic: &MqttTopicConfig) -> bool {
+    topic
+        .labels
+        .iter()
+        .any(|rule| matches!(rule, MqttLabelRule::Field { field: Some(_), .. }))
+        || topic
+            .timestamp
+            .as_ref()
+            .is_some_and(TimestampMapping::has_field)
+}
+
 pub(super) fn current_timestamp_us() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -446,15 +538,31 @@ pub(super) fn build_record_labels(
     property_resolver: Option<&dyn PropertyLabelResolver>,
     format: &dyn FormatHandler,
 ) -> HashMap<String, String> {
-    let mut labels = HashMap::new();
+    let decoded_payload = decode_payload_for_record(topic_cfg, payload, format);
 
-    let decoded_payload = decode_payload_for_labels(topic_cfg, payload, format);
+    build_record_labels_with_decoded(
+        topic_cfg,
+        payload,
+        decoded_payload.as_ref(),
+        property_resolver,
+        format,
+    )
+}
+
+pub(super) fn build_record_labels_with_decoded(
+    topic_cfg: &MqttTopicConfig,
+    payload: &[u8],
+    decoded_payload: Option<&Value>,
+    property_resolver: Option<&dyn PropertyLabelResolver>,
+    format: &dyn FormatHandler,
+) -> HashMap<String, String> {
+    let mut labels = HashMap::new();
 
     for rule in &topic_cfg.labels {
         apply_label_rule(
             &mut labels,
             rule,
-            decoded_payload.as_ref(),
+            decoded_payload,
             payload,
             property_resolver,
             format,
@@ -468,11 +576,15 @@ pub(super) trait PropertyLabelResolver {
     fn resolve_property(&self, property_name: &str) -> Option<String>;
 }
 
-fn decode_payload_for_labels(
+pub(super) fn decode_payload_for_record(
     topic_cfg: &MqttTopicConfig,
     payload: &[u8],
     format: &dyn FormatHandler,
 ) -> Option<Value> {
+    if !topic_uses_decoded_payload(topic_cfg) {
+        return None;
+    }
+
     match payload_format_for_topic(topic_cfg) {
         PayloadFormat::Json => format.decode_payload(payload, DecodeFormat::Json),
         PayloadFormat::Protobuf => {
@@ -492,6 +604,35 @@ fn decode_payload_for_labels(
         }
         PayloadFormat::None => None,
     }
+}
+
+pub(super) fn resolve_record_timestamp(
+    topic_cfg: &MqttTopicConfig,
+    decoded_payload: Option<&Value>,
+    property_resolver: Option<&dyn PropertyLabelResolver>,
+) -> Option<TimeResolutionResult> {
+    let timestamp = topic_cfg.timestamp.as_ref()?;
+
+    if let Some(field) = timestamp.field.as_deref() {
+        return Some(
+            decoded_payload
+                .map(|payload| resolve_from_json(payload, field, &timestamp.format))
+                .unwrap_or_else(|| Err(TimeResolutionError::resolution_failed("field", field))),
+        );
+    }
+
+    if let Some(property) = timestamp.property.as_deref() {
+        return Some(
+            property_resolver
+                .and_then(|resolver| resolver.resolve_property(property))
+                .map(|value| resolve_from_string(&value, "property", property, &timestamp.format))
+                .unwrap_or_else(|| {
+                    Err(TimeResolutionError::resolution_failed("property", property))
+                }),
+        );
+    }
+
+    None
 }
 
 fn apply_label_rule(
@@ -667,6 +808,7 @@ mod tests {
     };
     use crate::formats::PayloadFormatHandler;
     use crate::formats::protobuf::ProtobufHandler;
+    use crate::timestamp::{TimestampFormat, TimestampMapping};
     use bytes::Bytes;
     use rstest::{fixture, rstest};
     use rumqttc::v5::mqttbytes::v5::{Publish as V5Publish, PublishProperties};
@@ -685,6 +827,7 @@ mod tests {
                 schema_path: None,
                 schema_name: None,
                 labels: Vec::new(),
+                timestamp: None,
             }],
             qos: 1,
             username: None,
@@ -729,6 +872,25 @@ mod tests {
         cfg.topics[0].content_type = Some(" ".to_string());
     }
 
+    fn add_v3_timestamp_property(cfg: &mut MqttConfig) {
+        cfg.version = MqttVersion::V3;
+        cfg.topics[0].timestamp = Some(TimestampMapping {
+            field: None,
+            property: Some("event_time".to_string()),
+            header: None,
+            format: TimestampFormat::UnixUs,
+        });
+    }
+
+    fn add_timestamp_field_without_content_type(cfg: &mut MqttConfig) {
+        cfg.topics[0].timestamp = Some(TimestampMapping {
+            field: Some("event_time".to_string()),
+            property: None,
+            header: None,
+            format: TimestampFormat::UnixUs,
+        });
+    }
+
     #[test]
     fn rejects_labels_nested_under_topic_table() {
         let cfg_text = r#"
@@ -753,6 +915,14 @@ mod tests {
     #[case::invalid_qos(set_invalid_qos, "qos must be 0, 1, or 2")]
     #[case::password_without_username(set_password_without_username, "password requires username")]
     #[case::property_rule_for_v3(add_v3_property_rule, "does not support property label rules")]
+    #[case::timestamp_property_for_v3(
+        add_v3_timestamp_property,
+        "does not support timestamp property mapping"
+    )]
+    #[case::timestamp_field_without_content_type(
+        add_timestamp_field_without_content_type,
+        "timestamp.field requires JSON or protobuf content_type"
+    )]
     #[case::empty_topic_entry_name(
         set_empty_topic_entry_name,
         "topic entry_name must not be empty"
@@ -808,6 +978,7 @@ mod tests {
                     schema_path: None,
                     schema_name: None,
                     labels: Vec::new(),
+                    timestamp: None,
                 },
                 MqttTopicConfig {
                     name: "factory/+/telemetry".to_string(),
@@ -816,6 +987,7 @@ mod tests {
                     schema_path: None,
                     schema_name: None,
                     labels: Vec::new(),
+                    timestamp: None,
                 },
             ],
             ..mqtt_cfg()
@@ -836,6 +1008,7 @@ mod tests {
             schema_path: None,
             schema_name: None,
             labels: Vec::new(),
+            timestamp: None,
         };
 
         assert_eq!(
@@ -1023,6 +1196,7 @@ mod tests {
             schema_path: None,
             schema_name: None,
             labels: Vec::new(),
+            timestamp: None,
         }];
         cfg.entry_prefix = "/mqtt".to_string();
         cfg.topics[0].labels = vec![
@@ -1056,6 +1230,33 @@ mod tests {
         assert_eq!(record.content_type, Some("application/json".to_string()));
         assert_eq!(record.labels.get("device"), Some(&"dev-1".to_string()));
         assert_eq!(record.labels.get("source"), Some(&"mqtt".to_string()));
+    }
+
+    #[test]
+    fn builds_v3_record_with_json_field_timestamp() {
+        let mut cfg = mqtt_cfg();
+        cfg.version = MqttVersion::V3;
+        cfg.topics[0].name = "factory/+".to_string();
+        cfg.topics[0].content_type = Some("application/json".to_string());
+        cfg.topics[0].timestamp = Some(TimestampMapping {
+            field: Some("event_time".to_string()),
+            property: None,
+            header: None,
+            format: TimestampFormat::UnixMs,
+        });
+
+        let publish = rumqttc::Publish {
+            dup: false,
+            qos: rumqttc::QoS::AtMostOnce,
+            retain: false,
+            topic: "factory/device-1".to_string(),
+            pkid: 0,
+            payload: Bytes::from_static(br#"{"event_time":1500}"#),
+        };
+
+        let record = mqtt3::build_v3_record(&cfg, &publish, &PayloadFormatHandler::new(None));
+
+        assert_eq!(record.timestamp_us, 1_500_000);
     }
 
     #[test]
@@ -1197,6 +1398,7 @@ mod tests {
             schema_path: None,
             schema_name: None,
             labels: Vec::new(),
+            timestamp: None,
         }];
         cfg.entry_prefix = "/mqtt".to_string();
         cfg.topics[0].labels = vec![
@@ -1248,6 +1450,32 @@ mod tests {
     }
 
     #[test]
+    fn builds_v5_record_with_user_property_timestamp() {
+        let mut cfg = mqtt_cfg();
+        cfg.topics[0].name = "factory/+".to_string();
+        cfg.topics[0].timestamp = Some(TimestampMapping {
+            field: None,
+            property: Some("event_time".to_string()),
+            header: None,
+            format: TimestampFormat::UnixUs,
+        });
+
+        let publish = V5Publish {
+            topic: Bytes::from_static(b"factory/device-9"),
+            payload: Bytes::from_static(b"{}"),
+            properties: Some(PublishProperties {
+                user_properties: vec![("event_time".to_string(), "1500000".to_string())],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let record = mqtt5::build_v5_record(&cfg, &publish, &PayloadFormatHandler::new(None));
+
+        assert_eq!(record.timestamp_us, 1_500_000);
+    }
+
+    #[test]
     fn uses_default_content_type_for_v5_when_property_is_missing() {
         let mut cfg = mqtt_cfg();
         cfg.topics = vec![MqttTopicConfig {
@@ -1257,6 +1485,7 @@ mod tests {
             schema_path: None,
             schema_name: None,
             labels: Vec::new(),
+            timestamp: None,
         }];
 
         let publish = V5Publish {

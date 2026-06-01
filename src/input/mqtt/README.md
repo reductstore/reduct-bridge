@@ -13,6 +13,15 @@ Labels are applied with the following rules:
   - `property = "content_type"` reads the built-in MQTT v5 `content_type` property.
   - `property = "<name>"` reads the MQTT v5 user property named `<name>`.
 
+Record timestamps can be mapped per topic with `timestamp`:
+
+- `timestamp = { field = "event_time", format = "unix_ms" }` reads from a JSON or schema-decoded protobuf payload field.
+- `timestamp = { property = "event_time", format = "unix_us" }` reads from an MQTT v5 user property.
+- Supported formats are `unix_s`, `unix_ms`, `unix_us`, `unix_ns`, `iso8601`, and `ros_stamp`.
+- If timestamp extraction fails, the input falls back to the ingest time.
+
+**Performance:** Configuring `timestamp = { field = "..." }` enables payload decoding for each message, which may increase CPU usage. If you already use field-based label rules, no additional cost is incurred since the decoded payload is shared.
+
 ## Protobuf support
 
 MQTT input supports protobuf payloads and can map protobuf fields to labels.
@@ -61,6 +70,7 @@ entry_prefix = "/mqtt"
 name = "factory/+/telemetry"
 entry_name = "telemetry"
 content_type = "application/json"
+timestamp = { field = "event_time", format = "unix_ms" }
 labels = [
   { field = "device_id", label = "device" },
   { field = "site", label = "site" },

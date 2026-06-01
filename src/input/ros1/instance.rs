@@ -1,5 +1,6 @@
 use crate::formats::json::{extract_json_path, value_to_label};
 use crate::formats::ros1::msg_to_json;
+use crate::timestamp::{TimeResolutionResult, TimestampMapping, resolve_from_json};
 use anyhow::{Error, anyhow, bail};
 use log::warn;
 use rosrust::DynamicMsg;
@@ -27,6 +28,8 @@ pub struct Ros1TopicConfig {
     pub entry_name: Option<String>,
     #[serde(default)]
     pub labels: Vec<Ros1LabelRule>,
+    #[serde(default)]
+    pub timestamp: Option<TimestampMapping>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -89,6 +92,23 @@ impl Ros1Instance {
         rules
             .iter()
             .any(|rule| matches!(rule, Ros1LabelRule::Field { .. }))
+    }
+
+    pub(super) fn has_timestamp_field(topic: &Ros1TopicConfig) -> bool {
+        topic
+            .timestamp
+            .as_ref()
+            .is_some_and(TimestampMapping::has_field)
+    }
+
+    pub(super) fn resolve_timestamp(
+        message: &Value,
+        topic: &Ros1TopicConfig,
+    ) -> Option<TimeResolutionResult> {
+        let timestamp = topic.timestamp.as_ref()?;
+        let field = timestamp.field.as_deref()?;
+
+        Some(resolve_from_json(message, field, &timestamp.format))
     }
 
     pub(super) fn try_init_ros(node_name: &str, master_uri: &str) -> Result<(), Error> {
@@ -157,7 +177,8 @@ impl Ros1Instance {
 
 #[cfg(test)]
 mod tests {
-    use super::{PublisherDecoder, Ros1Instance, Ros1LabelRule};
+    use super::{PublisherDecoder, Ros1Instance, Ros1LabelRule, Ros1TopicConfig};
+    use crate::timestamp::{TimestampFormat, TimestampMapping};
     use rstest::{fixture, rstest};
     use serde_json::json;
     use std::collections::HashMap;
@@ -252,6 +273,35 @@ mod tests {
         #[case] expected: bool,
     ) {
         assert_eq!(Ros1Instance::has_dynamic_labels(&rules), expected);
+    }
+
+    #[test]
+    fn resolves_ros_stamp_timestamp_from_field() {
+        let topic = Ros1TopicConfig {
+            name: "/sensor/imu".to_string(),
+            entry_name: None,
+            labels: Vec::new(),
+            timestamp: Some(TimestampMapping {
+                field: Some("header.stamp".to_string()),
+                property: None,
+                header: None,
+                format: TimestampFormat::RosStamp,
+            }),
+        };
+        let message = json!({
+            "header": {
+                "stamp": {
+                    "sec": 42,
+                    "nsec": 123_456_789u64
+                }
+            }
+        });
+
+        assert!(Ros1Instance::has_timestamp_field(&topic));
+        assert_eq!(
+            Ros1Instance::resolve_timestamp(&message, &topic),
+            Some(Ok(42_123_456))
+        );
     }
 
     #[rstest]
