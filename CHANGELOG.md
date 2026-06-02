@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional ReductStore bucket creation via `[remotes.reduct.create_bucket]`, with configurable `quota_type`, numeric or human-readable `quota_size` values such as `"1GB"` and `"4GiB"`, updated examples/docs, and parsing coverage for valid and invalid unit strings, [PR-34](https://github.com/reductstore/reduct-bridge/pull/34).
 - Reduct remote attachment reconciliation with `attachments_resend_interval_ms` (default `300000`, `0` disables) to periodically restore missing attachments, including config/docs coverage and CI tests for enabled/disabled behavior, [PR-45](https://github.com/reductstore/reduct-bridge/pull/45).
 - Timestamp mapping from source data fields, headers, and MQTT v5 user properties for HTTP, MQTT, and ROS1 inputs, with shared parsing for Unix, ISO8601, and ROS stamp formats, [PR-46](https://github.com/reductstore/reduct-bridge/pull/46).
+- Protobuf support for MQTT input with schema-based decoding, wire-format field extraction, dynamic labeling, and descriptor attachments, [PR-31](https://github.com/reductstore/reduct-bridge/pull/31)
 
 ### Changed
 
@@ -34,7 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Metrics input for CPU, memory, and disk with JSON output and label mapping, [PR-19](https://github.com/reductstore/reduct-bridge/pull/19)
 - MQTT input for MQTT v3/v5 with payload/topic labels and optional JSON-schema attachments, [PR-24](https://github.com/reductstore/reduct-bridge/pull/24)
-- Protobuf support for MQTT input with schema-based decoding, wire-format field extraction, dynamic labeling, and descriptor attachments, [PR-31](https://github.com/reductstore/reduct-bridge/pull/31)
 
 ### Fixed
 
