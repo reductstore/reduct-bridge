@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.3.0 - 2026-06-02
+
 ### Added
 
 - HTTP input for polling HTTP/HTTPS endpoints on a fixed interval with GET requests, optional bearer/basic auth, header/static/JSON field label mapping, and HTTP-specific tests and documentation, [PR-33](https://github.com/reductstore/reduct-bridge/pull/33).
