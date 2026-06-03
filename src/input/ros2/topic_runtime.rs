@@ -1,6 +1,7 @@
 use super::{Ros2Instance, Ros2LabelRule};
 use crate::formats::ros2::Ros2DynamicParser;
 use crate::message::{Attachment, Message, Record};
+use crate::timestamp::{TimeResolutionError, TimestampMapping};
 use bytes::Bytes;
 use log::warn;
 use std::sync::Arc;
@@ -11,6 +12,7 @@ pub(super) struct Ros2TopicRuntime {
     entry_name: String,
     topic_name: String,
     labels_cfg: Vec<Ros2LabelRule>,
+    timestamp_cfg: Option<TimestampMapping>,
     parser: Option<Arc<Ros2DynamicParser>>,
     pipeline_tx: Sender<Message>,
 }
@@ -20,6 +22,7 @@ impl Ros2TopicRuntime {
         entry_name: String,
         topic_name: String,
         labels_cfg: Vec<Ros2LabelRule>,
+        timestamp_cfg: Option<TimestampMapping>,
         parser: Option<Arc<Ros2DynamicParser>>,
         pipeline_tx: Sender<Message>,
     ) -> Self {
@@ -27,6 +30,7 @@ impl Ros2TopicRuntime {
             entry_name,
             topic_name,
             labels_cfg,
+            timestamp_cfg,
             parser,
             pipeline_tx,
         }
@@ -73,19 +77,46 @@ impl Ros2TopicRuntime {
             Some(message) => Ros2Instance::build_labels(message, &self.labels_cfg),
             None => Ros2Instance::build_static_labels(&self.labels_cfg),
         };
-        let timestamp_us = match decoded
-            .as_ref()
-            .map(Ros2Instance::extract_header_timestamp_us)
-        {
-            Some(Ok(timestamp_us)) => timestamp_us,
-            Some(Err(err)) => {
-                warn!(
-                    "ROS2 timestamp mapping failed for topic '{}': {}; using fallback timestamp",
-                    self.topic_name, err
-                );
-                fallback_timestamp_us
+        let timestamp_us = match self.timestamp_cfg.as_ref() {
+            Some(timestamp_cfg) => {
+                let field = timestamp_cfg.field.as_deref().unwrap_or("<missing>");
+                match decoded.as_ref() {
+                    Some(message) => {
+                        match Ros2Instance::resolve_timestamp_with_mapping(message, timestamp_cfg) {
+                            Ok(timestamp_us) => timestamp_us,
+                            Err(err) => {
+                                warn!(
+                                    "ROS2 timestamp mapping failed for topic '{}': {}; using fallback timestamp",
+                                    self.topic_name, err
+                                );
+                                fallback_timestamp_us
+                            }
+                        }
+                    }
+                    None => {
+                        let err = TimeResolutionError::resolution_failed("field", field);
+                        warn!(
+                            "ROS2 timestamp mapping failed for topic '{}': {}; using fallback timestamp",
+                            self.topic_name, err
+                        );
+                        fallback_timestamp_us
+                    }
+                }
             }
-            None => fallback_timestamp_us,
+            None => match decoded
+                .as_ref()
+                .map(Ros2Instance::extract_header_timestamp_us)
+            {
+                Some(Ok(timestamp_us)) => timestamp_us,
+                Some(Err(err)) => {
+                    warn!(
+                        "ROS2 timestamp mapping failed for topic '{}': {}; using fallback timestamp",
+                        self.topic_name, err
+                    );
+                    fallback_timestamp_us
+                }
+                None => fallback_timestamp_us,
+            },
         };
 
         let record = Record {
@@ -111,6 +142,7 @@ mod tests {
     use crate::formats::ros2::Ros2DynamicParser;
     use crate::input::ros2::Ros2LabelRule;
     use crate::message::Message;
+    use crate::timestamp::{TimestampFormat, TimestampMapping};
     use rstest::{fixture, rstest};
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -125,6 +157,7 @@ mod tests {
 
     fn new_runtime(
         labels_cfg: Vec<Ros2LabelRule>,
+        timestamp_cfg: Option<TimestampMapping>,
         parser: Option<Arc<Ros2DynamicParser>>,
     ) -> (Ros2TopicRuntime, Receiver<Message>) {
         let (tx, rx) = channel::<Message>(8);
@@ -133,6 +166,7 @@ mod tests {
                 "entry_a".to_string(),
                 "/topic/a".to_string(),
                 labels_cfg,
+                timestamp_cfg,
                 parser,
                 tx,
             ),
@@ -142,7 +176,7 @@ mod tests {
 
     #[rstest]
     fn emit_attachment_sends_ros_schema_payload(static_labels: Vec<Ros2LabelRule>) {
-        let (runtime, mut rx) = new_runtime(static_labels, None);
+        let (runtime, mut rx) = new_runtime(static_labels, None, None);
         runtime.emit_attachment("std_msgs/msg/String", "string data");
 
         match rx.blocking_recv().expect("attachment should be sent") {
@@ -161,7 +195,7 @@ mod tests {
     fn handle_payload_without_parser_uses_static_labels_and_fallback_timestamp(
         static_labels: Vec<Ros2LabelRule>,
     ) {
-        let (runtime, mut rx) = new_runtime(static_labels, None);
+        let (runtime, mut rx) = new_runtime(static_labels, None, None);
         runtime.handle_payload(vec![1, 2, 3], 777);
 
         match rx.blocking_recv().expect("record should be sent") {
@@ -177,6 +211,31 @@ mod tests {
     }
 
     #[rstest]
+    fn handle_payload_with_timestamp_mapping_and_no_decode_uses_fallback_timestamp(
+        static_labels: Vec<Ros2LabelRule>,
+    ) {
+        let (runtime, mut rx) = new_runtime(
+            static_labels,
+            Some(TimestampMapping {
+                field: Some("header.stamp".to_string()),
+                property: None,
+                header: None,
+                format: TimestampFormat::RosStamp,
+            }),
+            None,
+        );
+        runtime.handle_payload(vec![1, 2, 3], 888);
+
+        match rx.blocking_recv().expect("record should be sent") {
+            Message::Data(record) => {
+                assert_eq!(record.timestamp_us, 888);
+                assert_eq!(record.labels.get("source"), Some(&"ros2".to_string()));
+            }
+            other => panic!("expected data message, got {other:?}"),
+        }
+    }
+
+    #[rstest]
     fn handle_payload_with_decode_error_falls_back_to_static_labels(
         static_labels: Vec<Ros2LabelRule>,
     ) {
@@ -184,7 +243,7 @@ mod tests {
             Ros2DynamicParser::new("std_msgs/msg/String", "string data\n")
                 .expect("parser should be created"),
         );
-        let (runtime, mut rx) = new_runtime(static_labels, Some(parser));
+        let (runtime, mut rx) = new_runtime(static_labels, None, Some(parser));
 
         runtime.handle_payload(vec![0, 1, 2], 1234);
 

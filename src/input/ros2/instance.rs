@@ -3,7 +3,9 @@ use super::wildcard;
 use crate::formats::json::{extract_json_path, value_to_label};
 use crate::formats::ros2::Ros2DynamicParser;
 use crate::message::Message;
-use crate::timestamp::{TimeResolutionResult, TimestampFormat, resolve_from_json};
+use crate::timestamp::{
+    TimeResolutionResult, TimestampFormat, TimestampMapping, resolve_from_json,
+};
 use anyhow::{Error, anyhow, bail};
 use log::{info, warn};
 use rclrs::{
@@ -48,6 +50,8 @@ pub struct Ros2TopicConfig {
     pub entry_name: Option<String>,
     #[serde(default)]
     pub labels: Vec<Ros2LabelRule>,
+    #[serde(default)]
+    pub timestamp: Option<TimestampMapping>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -133,6 +137,33 @@ impl Ros2Instance {
         rules
             .iter()
             .any(|rule| matches!(rule, Ros2LabelRule::Field { .. }))
+    }
+
+    pub(super) fn has_timestamp_field(topic: &Ros2TopicConfig) -> bool {
+        topic
+            .timestamp
+            .as_ref()
+            .is_some_and(TimestampMapping::has_field)
+    }
+
+    pub(super) fn needs_decode(topic: &Ros2TopicConfig) -> bool {
+        Self::has_dynamic_labels(&topic.labels) || Self::has_timestamp_field(topic)
+    }
+
+    pub(super) fn resolve_timestamp(
+        message: &Value,
+        topic: &Ros2TopicConfig,
+    ) -> Option<TimeResolutionResult> {
+        let timestamp = topic.timestamp.as_ref()?;
+        Some(Self::resolve_timestamp_with_mapping(message, timestamp))
+    }
+
+    pub(super) fn resolve_timestamp_with_mapping(
+        message: &Value,
+        timestamp: &TimestampMapping,
+    ) -> TimeResolutionResult {
+        let field = timestamp.field.as_deref().unwrap_or("header.stamp");
+        resolve_from_json(message, field, &timestamp.format)
     }
 
     pub(super) fn create_context(cfg: &Ros2Config) -> Result<Ros2Context, Error> {
@@ -486,8 +517,8 @@ impl Ros2Instance {
         let topic_name = topic_cfg.name.clone();
         let topic_type = topic_type.to_string();
         let schema = Self::load_schema_text(&topic_type, schema_paths)?;
-        let needs_dynamic_labels = Self::has_dynamic_labels(&topic_cfg.labels);
-        let parser = if needs_dynamic_labels {
+        let needs_decode = Self::needs_decode(topic_cfg);
+        let parser = if needs_decode {
             Some(Arc::new(Ros2DynamicParser::new(&topic_type, &schema)?))
         } else {
             None
@@ -500,6 +531,7 @@ impl Ros2Instance {
             entry_name,
             topic_name,
             topic_cfg.labels.clone(),
+            topic_cfg.timestamp.clone(),
             parser,
             pipeline_tx.clone(),
         );
@@ -607,7 +639,8 @@ impl Ros2Instance {
 
 #[cfg(test)]
 mod tests {
-    use super::{Ros2Instance, Ros2LabelRule};
+    use super::{Ros2Instance, Ros2LabelRule, Ros2TopicConfig};
+    use crate::timestamp::{TimestampFormat, TimestampMapping};
     use rstest::{fixture, rstest};
     use serde_json::json;
     use std::collections::HashMap;
@@ -673,6 +706,53 @@ mod tests {
     fn extract_header_timestamp_uses_ros_header_stamp(decoded_message: serde_json::Value) {
         let ts = Ros2Instance::extract_header_timestamp_us(&decoded_message);
         assert_eq!(ts, Ok(12_003_456));
+    }
+
+    #[test]
+    fn timestamp_field_enables_decode_even_without_dynamic_labels() {
+        let topic = Ros2TopicConfig {
+            name: "/camera/image".to_string(),
+            entry_name: None,
+            labels: Vec::new(),
+            timestamp: Some(TimestampMapping {
+                field: Some("header.stamp".to_string()),
+                property: None,
+                header: None,
+                format: TimestampFormat::RosStamp,
+            }),
+        };
+
+        assert!(Ros2Instance::has_timestamp_field(&topic));
+        assert!(Ros2Instance::needs_decode(&topic));
+    }
+
+    #[test]
+    fn resolves_timestamp_from_configured_ros_stamp_field() {
+        let topic = Ros2TopicConfig {
+            name: "/camera/image".to_string(),
+            entry_name: None,
+            labels: Vec::new(),
+            timestamp: Some(TimestampMapping {
+                field: Some("header.stamp".to_string()),
+                property: None,
+                header: None,
+                format: TimestampFormat::RosStamp,
+            }),
+        };
+
+        let message = json!({
+            "header": {
+                "stamp": {
+                    "sec": 42,
+                    "nanosec": 123_456_789u64
+                }
+            }
+        });
+
+        assert_eq!(
+            Ros2Instance::resolve_timestamp(&message, &topic),
+            Some(Ok(42_123_456))
+        );
     }
 
     #[rstest]

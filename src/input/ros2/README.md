@@ -53,6 +53,10 @@ labels = [
   { field = "data", label = "message" },
   { static = { source = "ros2" } }
 ]
+
+# Optional timestamp mapping. If extraction fails, the middleware/ingest fallback is used.
+# For standard ROS headers, use header.stamp with ros_stamp format.
+timestamp = { field = "header.stamp", format = "ros_stamp" }
 ```
 
 ## Build
@@ -87,6 +91,9 @@ reduct-bridge /etc/reduct-bridge/reduct-bridge.toml
 - Raw record content is stored as serialized CDR with content type `application/cdr`.
 - Message schema metadata is stored automatically in the `$ros` attachment.
 - Dynamic field labels are decoded with `ros2_message` using the resolved `.msg` schema text.
+- When `timestamp = { field = "...", format = "..." }` is configured, the bridge decodes the ROS2 message payload even if you do not configure dynamic label rules.
+
+**Performance:** Configuring `timestamp = { field = "..." }` enables ROS2 payload decoding for each message, which may increase CPU usage. If you already use field-based label rules, no additional cost is incurred since the decoded payload is shared.
 
 ## Changes
 
