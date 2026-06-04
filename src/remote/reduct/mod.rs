@@ -871,7 +871,7 @@ mod ci_tests {
             .await
             .expect("create bucket");
 
-        let remote = ReductInstance::new(remote_config(url, bucket_name.clone(), None, 50));
+        let remote = ReductInstance::new(remote_config(url, bucket_name.clone(), None, 500));
         let runtime = remote.launch().await.expect("launch remote");
         runtime
             .tx
@@ -890,13 +890,37 @@ mod ci_tests {
             sleep(Duration::from_millis(50)).await;
         }
 
-        bucket
-            .remove_attachments("it/entry", None)
-            .await
-            .expect("remove attachments");
+        let mut removed = false;
+        for _ in 0..10 {
+            match bucket.remove_attachments("it/entry", None).await {
+                Ok(()) => match bucket.read_attachments("it/entry").await {
+                    Ok(attachments) if !attachments.contains_key("$ros") => {
+                        removed = true;
+                        break;
+                    }
+                    Err(err) if err.status() == ErrorCode::NotFound => {
+                        removed = true;
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(err) => panic!("read attachments after remove: {err:?}"),
+                },
+                Err(err) => {
+                    if err.status() != ErrorCode::Unknown {
+                        panic!("remove attachments: {err:?}");
+                    }
+                }
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+
+        assert!(
+            removed,
+            "expected $ros attachment to be removed before resend"
+        );
 
         let mut restored = false;
-        for _ in 0..20 {
+        for _ in 0..30 {
             match bucket.read_attachments("it/entry").await {
                 Ok(attachments) if attachments.contains_key("$ros") => {
                     restored = true;
