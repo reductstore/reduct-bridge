@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- ROS2 topic timestamp mapping from decoded message fields, including config validation, docs/examples, and payload decoding when only timestamp extraction is configured, [PR-47](https://github.com/reductstore/reduct-bridge/pull/47).
+
 ## 0.3.0 - 2026-06-02
 
 ### Added

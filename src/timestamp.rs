@@ -1,4 +1,5 @@
 use crate::formats::json::extract_json_path;
+use anyhow::{Result, bail};
 use serde::Deserialize;
 use serde_json::Value;
 use std::fmt;
@@ -112,6 +113,27 @@ impl TimestampMapping {
     }
 }
 
+pub fn validate_field_timestamp_mapping(context: &str, timestamp: &TimestampMapping) -> Result<()> {
+    if timestamp.source_count() != 1 {
+        bail!("{} timestamp must define exactly one 'field'", context);
+    }
+    if timestamp.property.is_some() {
+        bail!("{} timestamp.property is not supported", context);
+    }
+    if timestamp.header.is_some() {
+        bail!("{} timestamp.header is not supported", context);
+    }
+    if timestamp
+        .field
+        .as_ref()
+        .is_some_and(|field| field.trim().is_empty())
+    {
+        bail!("{} timestamp.field must not be empty", context);
+    }
+
+    Ok(())
+}
+
 pub fn resolve_from_json(
     decoded: &Value,
     field: &str,
@@ -209,8 +231,9 @@ fn parse_unsigned_integer(value: &Value) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        TimeResolutionError, TimeResolutionErrorReason, TimestampFormat, parse_timestamp_us,
-        resolve_from_json, resolve_from_string,
+        TimeResolutionError, TimeResolutionErrorReason, TimestampFormat, TimestampMapping,
+        parse_timestamp_us, resolve_from_json, resolve_from_string,
+        validate_field_timestamp_mapping,
     };
     use rstest::rstest;
     use serde_json::json;
@@ -249,6 +272,36 @@ mod tests {
             parse_timestamp_us(&value, &TimestampFormat::RosStamp),
             Some(42_123_456)
         );
+    }
+
+    #[test]
+    fn validates_field_only_timestamp_mapping() {
+        let timestamp = TimestampMapping {
+            field: Some("header.stamp".to_string()),
+            property: None,
+            header: None,
+            format: TimestampFormat::RosStamp,
+        };
+
+        validate_field_timestamp_mapping("ROS2 topic '/imu'", &timestamp)
+            .expect("timestamp mapping should be valid");
+    }
+
+    #[test]
+    fn rejects_non_field_timestamp_mapping_sources() {
+        let timestamp = TimestampMapping {
+            field: Some("header.stamp".to_string()),
+            property: Some("event_time".to_string()),
+            header: None,
+            format: TimestampFormat::RosStamp,
+        };
+
+        let err = validate_field_timestamp_mapping("ROS2 topic '/imu'", &timestamp)
+            .expect_err("timestamp mapping should be invalid")
+            .to_string();
+
+        assert!(err.contains("ROS2 topic '/imu'"));
+        assert!(err.contains("timestamp must define exactly one 'field'"));
     }
 
     #[test]
