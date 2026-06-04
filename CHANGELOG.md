@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed periodic attachment resend skipping cached attachments when the entry is missing, [PR-49](https://github.com/reductstore/reduct-bridge/pull/49).
+
 ## 0.3.0 - 2026-06-02
 
 ### Added
