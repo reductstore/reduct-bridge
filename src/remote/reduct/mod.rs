@@ -232,7 +232,7 @@ impl ReductInstance {
             .insert(attachment.key.clone(), attachment.payload.clone());
     }
 
-    async fn resend_missing_attachments(
+    async fn resend_attachments(
         bucket: &Bucket,
         cache: &std::collections::HashMap<
             String,
@@ -240,31 +240,16 @@ impl ReductInstance {
         >,
     ) {
         for (entry, cached_attachments) in cache {
-            let existing_attachments = match bucket.read_attachments(entry).await {
-                Ok(attachments) => attachments,
-                Err(err) => {
-                    warn!(
-                        "Failed to read attachments for entry '{}' during periodic resend: {}",
-                        entry, err
-                    );
-                    continue;
-                }
-            };
-
-            let mut missing_attachments = std::collections::HashMap::new();
-            for (key, payload) in cached_attachments {
-                if !existing_attachments.contains_key(key) {
-                    missing_attachments.insert(key.clone(), payload.clone());
-                }
-            }
-
-            if missing_attachments.is_empty() {
+            if cached_attachments.is_empty() {
                 continue;
             }
 
-            if let Err(err) = bucket.write_attachments(entry, missing_attachments).await {
+            if let Err(err) = bucket
+                .write_attachments(entry, cached_attachments.clone())
+                .await
+            {
                 warn!(
-                    "Failed to resend missing attachments for entry '{}': {}",
+                    "Failed to resend attachments for entry '{}': {}",
                     entry, err
                 );
             }
@@ -375,7 +360,7 @@ impl RemoteInstanceLauncher for ReductInstance {
                             None => std::future::pending::<()>().await,
                         }
                     } => {
-                        Self::resend_missing_attachments(&bucket, &attachment_cache).await;
+                        Self::resend_attachments(&bucket, &attachment_cache).await;
                     }
                     _ = flush_ticker.tick() => {
                         if batch.record_count() > 0 {
