@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Periodic Reduct attachment resend now writes cached attachments without reading existing entry attachments first, preventing entries from being skipped when the entry is missing, [PR-49](https://github.com/reductstore/reduct-bridge/pull/49).
+
 ## 0.3.0 - 2026-06-02
 
 ### Added
