@@ -14,6 +14,7 @@
 use crate::input::InputLauncher;
 use crate::message::Message;
 use crate::runtime::ComponentRuntime;
+use crate::timestamp::validate_field_timestamp_mapping;
 use anyhow::{Error, anyhow, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn};
@@ -160,36 +161,7 @@ fn validate_timestamp_mapping(topic: &Ros1TopicConfig) -> Result<(), Error> {
         return Ok(());
     };
 
-    if timestamp.source_count() != 1 {
-        bail!(
-            "ROS topic '{}' timestamp must define exactly one 'field'",
-            topic.name
-        );
-    }
-    if timestamp.property.is_some() {
-        bail!(
-            "ROS topic '{}' timestamp.property is not supported",
-            topic.name
-        );
-    }
-    if timestamp.header.is_some() {
-        bail!(
-            "ROS topic '{}' timestamp.header is not supported",
-            topic.name
-        );
-    }
-    if timestamp
-        .field
-        .as_ref()
-        .is_some_and(|field| field.trim().is_empty())
-    {
-        bail!(
-            "ROS topic '{}' timestamp.field must not be empty",
-            topic.name
-        );
-    }
-
-    Ok(())
+    validate_field_timestamp_mapping(&format!("ROS topic '{}'", topic.name), timestamp)
 }
 
 #[cfg(test)]

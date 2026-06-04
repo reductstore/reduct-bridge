@@ -48,6 +48,8 @@ labels = [
     { field = "data", label = "message" },
     { static = { source = "ros1" } }
 ]
+# Optional timestamp mapping. For standard ROS headers, use header.stamp with ros_stamp.
+timestamp = { field = "header.stamp", format = "ros_stamp" }
 
 
 # ROS2 input configuration.
@@ -73,6 +75,8 @@ labels = [
     { field = "data", label = "message" },
     { static = { source = "ros2" } }
 ]
+# Optional timestamp mapping. For standard ROS headers, use header.stamp with ros_stamp.
+timestamp = { field = "header.stamp", format = "ros_stamp" }
 
 
 # Shell inputs
