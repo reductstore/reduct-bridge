@@ -232,7 +232,7 @@ impl ReductInstance {
             .insert(attachment.key.clone(), attachment.payload.clone());
     }
 
-    async fn resend_missing_attachments(
+    async fn resend_attachments(
         bucket: &Bucket,
         cache: &std::collections::HashMap<
             String,
@@ -240,31 +240,16 @@ impl ReductInstance {
         >,
     ) {
         for (entry, cached_attachments) in cache {
-            let existing_attachments = match bucket.read_attachments(entry).await {
-                Ok(attachments) => attachments,
-                Err(err) => {
-                    warn!(
-                        "Failed to read attachments for entry '{}' during periodic resend: {}",
-                        entry, err
-                    );
-                    continue;
-                }
-            };
-
-            let mut missing_attachments = std::collections::HashMap::new();
-            for (key, payload) in cached_attachments {
-                if !existing_attachments.contains_key(key) {
-                    missing_attachments.insert(key.clone(), payload.clone());
-                }
-            }
-
-            if missing_attachments.is_empty() {
+            if cached_attachments.is_empty() {
                 continue;
             }
 
-            if let Err(err) = bucket.write_attachments(entry, missing_attachments).await {
+            if let Err(err) = bucket
+                .write_attachments(entry, cached_attachments.clone())
+                .await
+            {
                 warn!(
-                    "Failed to resend missing attachments for entry '{}': {}",
+                    "Failed to resend attachments for entry '{}': {}",
                     entry, err
                 );
             }
@@ -375,7 +360,7 @@ impl RemoteInstanceLauncher for ReductInstance {
                             None => std::future::pending::<()>().await,
                         }
                     } => {
-                        Self::resend_missing_attachments(&bucket, &attachment_cache).await;
+                        Self::resend_attachments(&bucket, &attachment_cache).await;
                     }
                     _ = flush_ticker.tick() => {
                         if batch.record_count() > 0 {
@@ -886,7 +871,7 @@ mod ci_tests {
             .await
             .expect("create bucket");
 
-        let remote = ReductInstance::new(remote_config(url, bucket_name.clone(), None, 50));
+        let remote = ReductInstance::new(remote_config(url, bucket_name.clone(), None, 500));
         let runtime = remote.launch().await.expect("launch remote");
         runtime
             .tx
@@ -905,13 +890,37 @@ mod ci_tests {
             sleep(Duration::from_millis(50)).await;
         }
 
-        bucket
-            .remove_attachments("it/entry", None)
-            .await
-            .expect("remove attachments");
+        let mut removed = false;
+        for _ in 0..10 {
+            match bucket.remove_attachments("it/entry", None).await {
+                Ok(()) => match bucket.read_attachments("it/entry").await {
+                    Ok(attachments) if !attachments.contains_key("$ros") => {
+                        removed = true;
+                        break;
+                    }
+                    Err(err) if err.status() == ErrorCode::NotFound => {
+                        removed = true;
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(err) => panic!("read attachments after remove: {err:?}"),
+                },
+                Err(err) => {
+                    if err.status() != ErrorCode::Unknown {
+                        panic!("remove attachments: {err:?}");
+                    }
+                }
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+
+        assert!(
+            removed,
+            "expected $ros attachment to be removed before resend"
+        );
 
         let mut restored = false;
-        for _ in 0..20 {
+        for _ in 0..30 {
             match bucket.read_attachments("it/entry").await {
                 Ok(attachments) if attachments.contains_key("$ros") => {
                     restored = true;

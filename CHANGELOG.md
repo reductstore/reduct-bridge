@@ -11,17 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ROS2 topic timestamp mapping from decoded message fields, including config validation, docs/examples, and payload decoding when only timestamp extraction is configured, [PR-47](https://github.com/reductstore/reduct-bridge/pull/47).
 
+### Fixed
+
+- Fixed periodic attachment resend skipping cached attachments when the entry is missing, [PR-49](https://github.com/reductstore/reduct-bridge/pull/49).
+
 ## 0.3.0 - 2026-06-02
 
 ### Added
 
 - HTTP input for polling HTTP/HTTPS endpoints on a fixed interval with GET requests, optional bearer/basic auth, header/static/JSON field label mapping, and HTTP-specific tests and documentation, [PR-33](https://github.com/reductstore/reduct-bridge/pull/33).
 - Optional ReductStore bucket creation via `[remotes.reduct.create_bucket]`, with configurable `quota_type`, numeric or human-readable `quota_size` values such as `"1GB"` and `"4GiB"`, updated examples/docs, and parsing coverage for valid and invalid unit strings, [PR-34](https://github.com/reductstore/reduct-bridge/pull/34).
-- Bundle-style `ros1`, `ros2`, and `iot` build features with CI and installation documentation updates, [PR-37](https://github.com/reductstore/reduct-bridge/pull/37).
-- Preferred keyed TOML syntax for Reduct remotes (`[remotes.reduct.<name>]`) while keeping `[[remotes.reduct]]` backward compatible, now with deprecation warnings when the legacy array syntax is used, including updated docs/examples and parser coverage, [PR-42](https://github.com/reductstore/reduct-bridge/pull/42).
-- Improved Reduct `create_bucket` quota UX by defaulting `quota_type` to `NONE`, requiring `quota_size` only for `FIFO`/`HARD`, and aligning launch/config validation and docs with this behavior, [PR-43](https://github.com/reductstore/reduct-bridge/pull/43).
 - Reduct remote attachment reconciliation with `attachments_resend_interval_ms` (default `300000`, `0` disables) to periodically restore missing attachments, including config/docs coverage and CI tests for enabled/disabled behavior, [PR-45](https://github.com/reductstore/reduct-bridge/pull/45).
 - Timestamp mapping from source data fields, headers, and MQTT v5 user properties for HTTP, MQTT, and ROS1 inputs, with shared parsing for Unix, ISO8601, and ROS stamp formats, [PR-46](https://github.com/reductstore/reduct-bridge/pull/46).
+- Protobuf support for MQTT input with schema-based decoding, wire-format field extraction, dynamic labeling, and descriptor attachments, [PR-31](https://github.com/reductstore/reduct-bridge/pull/31)
+
+### Changed
+
+- Bundle-style `ros1`, `ros2`, and `iot` build features with CI and installation documentation updates, [PR-37](https://github.com/reductstore/reduct-bridge/pull/37).
+- Improved Reduct `create_bucket` quota UX by defaulting `quota_type` to `NONE`, requiring `quota_size` only for `FIFO`/`HARD`, and aligning launch/config validation and docs with this behavior, [PR-43](https://github.com/reductstore/reduct-bridge/pull/43).
+- Preferred keyed TOML syntax for Reduct remotes (`[remotes.reduct.<name>]`) while keeping `[[remotes.reduct]]` backward compatible, now with deprecation warnings when the legacy array syntax is used, including updated docs/examples and parser coverage, [PR-42](https://github.com/reductstore/reduct-bridge/pull/42).
 
 ## 0.2.1 - 2026-05-19
 
@@ -35,7 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Metrics input for CPU, memory, and disk with JSON output and label mapping, [PR-19](https://github.com/reductstore/reduct-bridge/pull/19)
 - MQTT input for MQTT v3/v5 with payload/topic labels and optional JSON-schema attachments, [PR-24](https://github.com/reductstore/reduct-bridge/pull/24)
-- Protobuf support for MQTT input with schema-based decoding, wire-format field extraction, dynamic labeling, and descriptor attachments, [PR-31](https://github.com/reductstore/reduct-bridge/pull/31)
 
 ### Fixed
 
