@@ -1,6 +1,6 @@
 use super::instance::PublisherDecoder;
 use super::{Ros1Instance, Ros1TopicConfig};
-use crate::message::{Attachment, Message, Record};
+use crate::message::{Attachment, Message, Record, SCHEMA_ATTACHMENT_KEY};
 use crate::timestamp::TimeResolutionError;
 use log::warn;
 use rosrust::{DynamicMsg, RawMessage};
@@ -124,7 +124,7 @@ impl TopicRuntime {
         });
         let attachment = Attachment {
             entry_name: self.entry_name.clone(),
-            key: "$ros".to_string(),
+            key: SCHEMA_ATTACHMENT_KEY.to_string(),
             payload: attachment_payload,
         };
         if let Err(err) = self
@@ -241,8 +241,8 @@ mod tests {
     }
 
     #[rstest]
-    #[case("std_msgs/String", "string data", "$ros")]
-    #[case("", "", "$ros")]
+    #[case("std_msgs/String", "string data", "$schema")]
+    #[case("", "", "$schema")]
     fn handle_connect_emits_attachment(
         static_topic_cfg: Ros1TopicConfig,
         #[case] schema_name: &str,

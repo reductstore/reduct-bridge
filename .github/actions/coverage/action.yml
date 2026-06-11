@@ -43,7 +43,7 @@ runs:
           source "${{ inputs.ros-setup-script }}"
           set -u
         fi
-        cargo test ${{ inputs.cargo-args }} ci_reductstore_roundtrip_data_and_attachment -- --nocapture
+        cargo test ${{ inputs.cargo-args }} ci_reductstore -- --nocapture
 
     - name: Run code coverage
       shell: bash

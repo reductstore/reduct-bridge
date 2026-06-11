@@ -1,6 +1,6 @@
 use super::{Ros2Instance, Ros2LabelRule};
 use crate::formats::ros2::Ros2DynamicParser;
-use crate::message::{Attachment, Message, Record};
+use crate::message::{Attachment, Message, Record, SCHEMA_ATTACHMENT_KEY};
 use crate::timestamp::{TimeResolutionError, TimestampMapping};
 use bytes::Bytes;
 use log::warn;
@@ -39,7 +39,7 @@ impl Ros2TopicRuntime {
     pub(super) fn emit_attachment(&self, schema_name: &str, schema: &str) {
         let attachment = Attachment {
             entry_name: self.entry_name.clone(),
-            key: "$ros".to_string(),
+            key: SCHEMA_ATTACHMENT_KEY.to_string(),
             payload: serde_json::json!({
                 "encoding": "cdr",
                 "topic": self.topic_name,
@@ -182,7 +182,7 @@ mod tests {
         match rx.blocking_recv().expect("attachment should be sent") {
             Message::Attachment(attachment) => {
                 assert_eq!(attachment.entry_name, "entry_a");
-                assert_eq!(attachment.key, "$ros");
+                assert_eq!(attachment.key, "$schema");
                 assert_eq!(attachment.payload["topic"], "/topic/a");
                 assert_eq!(attachment.payload["schema_name"], "std_msgs/msg/String");
                 assert_eq!(attachment.payload["schema"], "string data");
