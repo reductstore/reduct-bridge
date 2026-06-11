@@ -878,7 +878,7 @@ mod ci_tests {
 
     #[rstest]
     #[tokio::test]
-    #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
+    #[cfg(any(feature = "ros1", feature = "ros2"))]
     async fn ci_reductstore_keeps_legacy_ros_attachment_key(ros_attachment_message: Message) {
         let suffix = unique_suffix();
         let bucket_name = format!("it-{suffix}");

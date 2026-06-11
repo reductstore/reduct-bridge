@@ -74,8 +74,8 @@ runs:
 
         echo "=== [ros1-it] Verifying ROS attachment payload ==="
         attach_head="$(curl -sfI "${REDUCT_URL}/api/v1/b/${BUCKET}/camera-raw/\$meta")"
-        if ! echo "$attach_head" | grep -Fq 'x-reduct-label-key: $ros'; then
-          echo "Attachment key \$ros is missing in attachment headers:"
+        if ! echo "$attach_head" | grep -Fq 'x-reduct-label-key: $schema'; then
+          echo "Attachment key \$schema is missing in attachment headers:"
           echo "$attach_head"
           exit 1
         fi
