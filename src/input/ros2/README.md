@@ -89,7 +89,7 @@ reduct-bridge /etc/reduct-bridge/reduct-bridge.toml
 ```
 
 - Raw record content is stored as serialized CDR with content type `application/cdr`.
-- Message schema metadata is stored automatically in the `$ros` attachment.
+- Message schema metadata is stored automatically for ROS topics.
 - Dynamic field labels are decoded with `ros2_message` using the resolved `.msg` schema text.
 - When `timestamp = { field = "...", format = "..." }` is configured, the bridge decodes the ROS2 message payload even if you do not configure dynamic label rules.
 

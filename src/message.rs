@@ -25,6 +25,11 @@ pub struct Record {
     pub labels: HashMap<String, String>,
 }
 
+pub const SCHEMA_ATTACHMENT_KEY: &str = "$schema";
+
+#[cfg(any(feature = "ros1", feature = "ros2"))]
+pub const LEGACY_ROS_ATTACHMENT_KEY: &str = "$ros";
+
 #[derive(Debug, Clone)]
 #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
 pub struct Attachment {
