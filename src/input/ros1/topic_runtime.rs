@@ -241,8 +241,8 @@ mod tests {
     }
 
     #[rstest]
-    #[case("std_msgs/String", "string data", "$schema")]
-    #[case("", "", "$schema")]
+    #[case("std_msgs/String", "string data", SCHEMA_ATTACHMENT_KEY)]
+    #[case("", "", SCHEMA_ATTACHMENT_KEY)]
     fn handle_connect_emits_attachment(
         static_topic_cfg: Ros1TopicConfig,
         #[case] schema_name: &str,

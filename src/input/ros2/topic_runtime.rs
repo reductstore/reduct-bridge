@@ -182,7 +182,7 @@ mod tests {
         match rx.blocking_recv().expect("attachment should be sent") {
             Message::Attachment(attachment) => {
                 assert_eq!(attachment.entry_name, "entry_a");
-                assert_eq!(attachment.key, "$schema");
+                assert_eq!(attachment.key, SCHEMA_ATTACHMENT_KEY);
                 assert_eq!(attachment.payload["topic"], "/topic/a");
                 assert_eq!(attachment.payload["schema_name"], "std_msgs/msg/String");
                 assert_eq!(attachment.payload["schema"], "string data");

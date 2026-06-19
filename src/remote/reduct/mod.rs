@@ -14,7 +14,9 @@
 #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
 use crate::message::Attachment;
 #[cfg(any(feature = "ros1", feature = "ros2"))]
-use crate::message::{LEGACY_ROS_ATTACHMENT_KEY, SCHEMA_ATTACHMENT_KEY};
+use crate::message::LEGACY_ROS_ATTACHMENT_KEY;
+#[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
+use crate::message::SCHEMA_ATTACHMENT_KEY;
 use crate::message::{Message, Record};
 use crate::remote::RemoteInstanceLauncher;
 use crate::runtime::ComponentRuntime;
@@ -724,7 +726,7 @@ mod ci_tests {
     fn ros_attachment_message() -> Message {
         Message::Attachment(Attachment {
             entry_name: "entry".to_string(),
-            key: "$schema".to_string(),
+            key: SCHEMA_ATTACHMENT_KEY.to_string(),
             payload: json!({
                 "encoding": "ros1",
                 "schema": "float64 x",
@@ -870,7 +872,9 @@ mod ci_tests {
             .read_attachments("it/entry")
             .await
             .expect("read attachments");
-        let payload = attachments.get("$schema").expect("$schema attachment");
+        let payload = attachments
+            .get(SCHEMA_ATTACHMENT_KEY)
+            .expect("$schema attachment");
         assert_eq!(payload["encoding"], "ros1");
         assert_eq!(payload["topic"], "/sensor/pos");
         assert_eq!(payload["schema_name"], "geometry_msgs/Point");
@@ -895,7 +899,10 @@ mod ci_tests {
         bucket
             .write_attachments(
                 "it/entry",
-                HashMap::from([("$ros".to_string(), json!({"encoding": "ros1"}))]),
+                HashMap::from([(
+                    LEGACY_ROS_ATTACHMENT_KEY.to_string(),
+                    json!({"encoding": "ros1"}),
+                )]),
             )
             .await
             .expect("seed legacy attachment");
@@ -908,11 +915,11 @@ mod ci_tests {
             .await
             .expect("read attachments");
         let payload = attachments
-            .get("$ros")
+            .get(LEGACY_ROS_ATTACHMENT_KEY)
             .expect("legacy $ros attachment should be updated in place");
         assert_eq!(payload["topic"], "/sensor/pos");
         assert!(
-            !attachments.contains_key("$schema"),
+            !attachments.contains_key(SCHEMA_ATTACHMENT_KEY),
             "should not write a $schema attachment when a legacy $ros key exists"
         );
     }
@@ -946,7 +953,7 @@ mod ci_tests {
         let bucket = client.get_bucket(&bucket_name).await.expect("get bucket");
         for _ in 0..10 {
             match bucket.read_attachments("it/entry").await {
-                Ok(attachments) if attachments.contains_key("$schema") => break,
+                Ok(attachments) if attachments.contains_key(SCHEMA_ATTACHMENT_KEY) => break,
                 Ok(_) => {}
                 Err(err) if err.status() == ErrorCode::NotFound => {}
                 Err(err) => panic!("read attachments: {err:?}"),
@@ -958,7 +965,7 @@ mod ci_tests {
         for _ in 0..10 {
             match bucket.remove_attachments("it/entry", None).await {
                 Ok(()) => match bucket.read_attachments("it/entry").await {
-                    Ok(attachments) if !attachments.contains_key("$schema") => {
+                    Ok(attachments) if !attachments.contains_key(SCHEMA_ATTACHMENT_KEY) => {
                         removed = true;
                         break;
                     }
@@ -986,7 +993,7 @@ mod ci_tests {
         let mut restored = false;
         for _ in 0..30 {
             match bucket.read_attachments("it/entry").await {
-                Ok(attachments) if attachments.contains_key("$schema") => {
+                Ok(attachments) if attachments.contains_key(SCHEMA_ATTACHMENT_KEY) => {
                     restored = true;
                     break;
                 }
@@ -1032,7 +1039,7 @@ mod ci_tests {
         let bucket = client.get_bucket(&bucket_name).await.expect("get bucket");
         for _ in 0..10 {
             match bucket.read_attachments("it/entry").await {
-                Ok(attachments) if attachments.contains_key("$schema") => break,
+                Ok(attachments) if attachments.contains_key(SCHEMA_ATTACHMENT_KEY) => break,
                 Ok(_) => {}
                 Err(err) if err.status() == ErrorCode::NotFound => {}
                 Err(err) => panic!("read attachments: {err:?}"),
@@ -1051,7 +1058,7 @@ mod ci_tests {
         runtime.task.await.expect("join remote");
 
         match bucket.read_attachments("it/entry").await {
-            Ok(attachments) => assert!(!attachments.contains_key("$schema")),
+            Ok(attachments) => assert!(!attachments.contains_key(SCHEMA_ATTACHMENT_KEY)),
             Err(err) if err.status() == ErrorCode::NotFound => {}
             Err(err) => panic!("read attachments: {err:?}"),
         }

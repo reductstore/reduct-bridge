@@ -8,6 +8,7 @@ use std::path::Path;
 
 use super::{AttachmentContext, DecodeFormat, FormatAttachment, FormatHandler};
 use crate::formats::json::{extract_json_path, value_to_label};
+use crate::message::SCHEMA_ATTACHMENT_KEY;
 
 pub(crate) struct ProtobufHandler {
     schemas: HashMap<String, SchemaArtifact>,
@@ -90,7 +91,7 @@ impl FormatHandler for ProtobufHandler {
             )
         })?;
         Ok(FormatAttachment {
-            key: "$schema".to_string(),
+            key: SCHEMA_ATTACHMENT_KEY.to_string(),
             payload: serde_json::json!({
                 "encoding": "protobuf",
                 "topic": context.publish_topic,
@@ -343,7 +344,7 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(attachment.key, "$schema");
+        assert_eq!(attachment.key, SCHEMA_ATTACHMENT_KEY);
         assert_eq!(attachment.payload["encoding"], "protobuf");
         assert_eq!(attachment.payload["topic"], "factory/line-1/telemetry");
         assert_eq!(
