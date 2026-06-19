@@ -141,7 +141,7 @@ mod tests {
     use super::Ros2TopicRuntime;
     use crate::formats::ros2::Ros2DynamicParser;
     use crate::input::ros2::Ros2LabelRule;
-    use crate::message::Message;
+    use crate::message::{Message, SCHEMA_ATTACHMENT_KEY};
     use crate::timestamp::{TimestampFormat, TimestampMapping};
     use rstest::{fixture, rstest};
     use std::collections::HashMap;

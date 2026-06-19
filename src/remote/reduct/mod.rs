@@ -621,6 +621,8 @@ mod unit_tests {
 #[cfg(all(test, feature = "ci"))]
 mod ci_tests {
     use super::{CreateBucketConfig, ReductInstance, RemoteConfig, SCHEMA_ATTACHMENT_KEY};
+    #[cfg(any(feature = "ros1", feature = "ros2"))]
+    use super::LEGACY_ROS_ATTACHMENT_KEY;
     #[cfg(any(feature = "ros1", feature = "ros2", feature = "mqtt"))]
     use crate::message::Attachment;
     use crate::message::{Message, Record};

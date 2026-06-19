@@ -177,7 +177,7 @@ fn current_timestamp_us() -> u64 {
 mod tests {
     use super::TopicRuntime;
     use crate::input::ros1::{Ros1LabelRule, Ros1TopicConfig};
-    use crate::message::Message;
+    use crate::message::{Message, SCHEMA_ATTACHMENT_KEY};
     use rosrust::RawMessage;
     use rstest::{fixture, rstest};
     use std::collections::HashMap;
