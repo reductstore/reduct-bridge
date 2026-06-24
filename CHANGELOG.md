@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Hardened the build and dev supply chain by pinning Rust 1.96.0 in-repo, enforcing locked Cargo installs in CI/coverage, digest-pinning Docker base/runtime images, verifying the downloaded `reduct-cli` release archive, and hash-pinning the MQTT dev helper Python dependencies.
 - ROS1/ROS2 schema metadata is now stored under the `$schema` attachment key by default, falling back to the legacy `$ros` key for entries that already carry one, [PR-51](https://github.com/reductstore/reduct-bridge/pull/51).
 
 ## 0.3.1 - 2026-06-04

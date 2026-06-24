@@ -31,13 +31,19 @@ inputs:
     required: false
     default: 'true'
   base_image:
-    description: 'Base Docker image (e.g., ubuntu:24.04, ubuntu:22.04).'
+    description: 'Base Docker image (for example ubuntu:24.04@sha256:...).'
     required: false
-    default: 'ubuntu:24.04'
+    default: 'ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11'
   ros_distro:
     description: 'ROS distro to install (empty for no ROS).'
     required: false
     default: ''
+  reduct_cli_version:
+    description: 'Pinned reduct-cli release version without the leading v.'
+    required: true
+  reduct_cli_sha256:
+    description: 'Expected SHA-256 for the reduct-cli archive matching the selected target.'
+    required: true
   sbom:
     description: 'Generate SBOM attestation.'
     required: false
@@ -58,20 +64,23 @@ runs:
         name: ${{ inputs.bridge_artifact_name != '' && inputs.bridge_artifact_name || format('reduct-bridge-{0}', inputs.target) }}
         path: /tmp/reduct-bridge/
 
-    - name: Download reduct-cli from latest release
+    - name: Download reduct-cli from pinned release
       shell: bash
       run: |
         set -euo pipefail
         target="${{ inputs.target }}"
+        version="${{ inputs.reduct_cli_version }}"
+        sha256="${{ inputs.reduct_cli_sha256 }}"
         ext="tar.gz"
         if [[ "$target" == *windows* ]]; then
           ext="zip"
         fi
         asset_name="reduct-cli.${target}.${ext}"
-        asset_url="https://github.com/reductstore/reduct-cli/releases/latest/download/${asset_name}"
+        asset_url="https://github.com/reductstore/reduct-cli/releases/download/v${version}/${asset_name}"
 
         mkdir -p /tmp/reduct-cli
         wget -q -O "/tmp/${asset_name}" "$asset_url"
+        echo "${sha256}  /tmp/${asset_name}" | sha256sum -c -
         echo "Downloaded ${asset_name} from ${asset_url}"
 
         if [ "$ext" = "zip" ]; then

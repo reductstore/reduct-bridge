@@ -2,6 +2,8 @@
 
 Each subdirectory contains a self-contained `docker-compose.yml` and config for a specific input type.
 
+The helper stacks intentionally use digest-pinned container images, and the MQTT publisher images install Python dependencies from hash-checked requirements files. When updating those dev helpers, bump the image digests and regenerate `requirements-*.txt` with hashes instead of switching back to floating tags or ad-hoc `pip install` commands.
+
 ## MQTT
 
 ```sh

@@ -23,12 +23,28 @@ runs:
   steps:
     - uses: actions/checkout@v4
 
+    - name: Resolve Rust toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        toolchain="$(python3 - <<'PY'
+import tomllib
+with open('rust-toolchain.toml', 'rb') as fh:
+    print(tomllib.load(fh)['toolchain']['channel'])
+PY
+)"
+        echo "RUST_TOOLCHAIN=${toolchain}" >> "$GITHUB_ENV"
+        echo "RUSTUP_TOOLCHAIN=${toolchain}" >> "$GITHUB_ENV"
+
     - name: Install Rust
       shell: bash
-      run: rustup update stable
+      run: |
+        set -euo pipefail
+        rustup toolchain install "${RUST_TOOLCHAIN}" --profile minimal --component rustfmt --component llvm-tools-preview
 
     - name: Install cargo-llvm-cov
-      uses: taiki-e/install-action@cargo-llvm-cov
+      shell: bash
+      run: cargo install cargo-llvm-cov --version 0.8.7 --locked --force
 
     - name: Run ReductStore integration test (CI feature)
       shell: bash
@@ -43,7 +59,7 @@ runs:
           source "${{ inputs.ros-setup-script }}"
           set -u
         fi
-        cargo test ${{ inputs.cargo-args }} ci_reductstore -- --nocapture
+        cargo test --locked ${{ inputs.cargo-args }} ci_reductstore_roundtrip_data_and_attachment -- --nocapture
 
     - name: Run code coverage
       shell: bash
@@ -58,7 +74,7 @@ runs:
           source "${{ inputs.ros-setup-script }}"
           set -u
         fi
-        cargo llvm-cov --workspace ${{ inputs.cargo-args }} --lcov --output-path lcov.info
+        cargo llvm-cov --locked --workspace ${{ inputs.cargo-args }} --lcov --output-path lcov.info
 
     - name: Upload coverage artifact
       uses: actions/upload-artifact@v4

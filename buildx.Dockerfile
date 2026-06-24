@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-ARG BASE_IMAGE=ubuntu:24.04
+ARG BASE_IMAGE=ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11
 
 FROM ${BASE_IMAGE} AS builder
 
@@ -11,6 +11,7 @@ RUN mkdir -p /data && chown 10001:10001 /data
 FROM ${BASE_IMAGE}
 
 ARG ROS_DISTRO=""
+ARG ROS_APT_KEY_FINGERPRINT="C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
@@ -23,7 +24,14 @@ RUN if [ -n "$ROS_DISTRO" ]; then \
             curl \
             gnupg \
             lsb-release \
-        && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
+        && curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /tmp/ros.key \
+        && fingerprint="$(gpg --batch --show-keys --with-colons --fingerprint /tmp/ros.key | awk -F: '/^fpr:/ { print $10; exit }')" \
+        && if [ "$fingerprint" != "$ROS_APT_KEY_FINGERPRINT" ]; then \
+              echo "Unexpected ROS apt key fingerprint: $fingerprint" >&2; \
+              exit 1; \
+           fi \
+        && gpg --batch --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg /tmp/ros.key \
+        && rm -f /tmp/ros.key \
         && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" > /etc/apt/sources.list.d/ros2.list \
         && apt-get update \
         && apt-get install -y --no-install-recommends \

@@ -24,6 +24,8 @@ env:
   REGISTRY_IMAGE: reduct/bridge
   AWS_LC_SYS_USE_PREBUILT: 0
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  REDUCT_CLI_VERSION: "0.12.2"
+  REDUCT_CLI_SHA256_X86_64_UNKNOWN_LINUX_GNU: "2acabd6a36a2c424c8088d54a83627cc1bd5a62dc55935d2b0f2d5ba5d815415"
 
 jobs:
   rust_fmt:
@@ -86,7 +88,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ros-${{ matrix.ros_distro }}-example-interfaces ros-${{ matrix.ros_distro }}-test-msgs
       - uses: ./.github/actions/build-binaries
         with:
-          minimal_rust_version: ${{ vars.MINIMAL_RUST_VERSION || 'stable' }}
           action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
           artifact-prefix: ${{ matrix.artifact_prefix }}
           target: ${{ matrix.target }}
@@ -316,22 +317,22 @@ jobs:
           - image_artifact_name: image-ros1-linux-amd64
             bridge_artifact_name: bridge-ros1-x86_64-unknown-linux-gnu
             image_tag: reduct/bridge:ros1-test
-            base_image: ubuntu:24.04
+            base_image: ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11
             ros_distro: ""
           - image_artifact_name: image-ros2-jazzy-linux-amd64
             bridge_artifact_name: bridge-ros2-jazzy-x86_64-unknown-linux-gnu
             image_tag: reduct/bridge:ros2-jazzy-test
-            base_image: ubuntu:24.04
+            base_image: ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11
             ros_distro: jazzy
           - image_artifact_name: image-ros2-humble-linux-amd64
             bridge_artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
             image_tag: reduct/bridge:ros2-humble-test
-            base_image: ubuntu:22.04
+            base_image: ubuntu:22.04@sha256:ce941a2a18bbb922e434d6d6d2b31e571a5c3826eaf6ada0a41dcc905bd2d906
             ros_distro: humble
           - image_artifact_name: image-iot-linux-amd64
             bridge_artifact_name: bridge-iot-x86_64-unknown-linux-gnu
             image_tag: reduct/bridge:iot-test
-            base_image: ubuntu:24.04
+            base_image: ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11
             ros_distro: ""
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -343,6 +344,8 @@ jobs:
           bridge_artifact_name: ${{ matrix.bridge_artifact_name }}
           image_artifact_name: ${{ matrix.image_artifact_name }}
           image_tag: ${{ matrix.image_tag }}
+          reduct_cli_version: ${{ env.REDUCT_CLI_VERSION }}
+          reduct_cli_sha256: ${{ env.REDUCT_CLI_SHA256_X86_64_UNKNOWN_LINUX_GNU }}
           base_image: ${{ matrix.base_image }}
           ros_distro: ${{ matrix.ros_distro }}
 
@@ -459,28 +462,28 @@ jobs:
             bridge_artifact_name: bridge-ros1-x86_64-unknown-linux-gnu
             image_name: reduct/bridge
             image_suffix: ros1
-            base_image: ubuntu:24.04
+            base_image: ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11
             ros_distro: ""
           - platform: linux/amd64
             cargo_target: x86_64-unknown-linux-gnu
             bridge_artifact_name: bridge-ros2-jazzy-x86_64-unknown-linux-gnu
             image_name: reduct/bridge
             image_suffix: ros2-jazzy
-            base_image: ubuntu:24.04
+            base_image: ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11
             ros_distro: jazzy
           - platform: linux/amd64
             cargo_target: x86_64-unknown-linux-gnu
             bridge_artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
             image_name: reduct/bridge
             image_suffix: ros2-humble
-            base_image: ubuntu:22.04
+            base_image: ubuntu:22.04@sha256:ce941a2a18bbb922e434d6d6d2b31e571a5c3826eaf6ada0a41dcc905bd2d906
             ros_distro: humble
           - platform: linux/amd64
             cargo_target: x86_64-unknown-linux-gnu
             bridge_artifact_name: bridge-iot-x86_64-unknown-linux-gnu
             image_name: reduct/bridge
             image_suffix: iot
-            base_image: ubuntu:24.04
+            base_image: ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11
             ros_distro: ""
 
     steps:
@@ -510,6 +513,8 @@ jobs:
           target: ${{ matrix.cargo_target }}
           bridge_artifact_name: ${{ matrix.bridge_artifact_name }}
           image_tag: ${{ steps.meta.outputs.tags }}
+          reduct_cli_version: ${{ env.REDUCT_CLI_VERSION }}
+          reduct_cli_sha256: ${{ env.REDUCT_CLI_SHA256_X86_64_UNKNOWN_LINUX_GNU }}
           docker_labels: ${{ steps.meta.outputs.labels }}
           upload_artifact: "false"
           build_outputs: type=image,push=true

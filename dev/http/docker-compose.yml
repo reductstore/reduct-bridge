@@ -1,6 +1,6 @@
 services:
   reductstore:
-    image: reduct/store:main
+    image: reduct/store:main@sha256:85402f88e8618a14ce0f57b55f53e724463c66d89623d0807f42a860683a92e8
     ports:
       - "8383:8383"
     environment:
@@ -9,13 +9,13 @@ services:
       RS_BUCKET_A_QUOTA_SIZE: 100MB
 
   api:
-    image: python:3.12-slim
+    image: python:3.12-slim@sha256:86d3e4424d5e963e60594a3a6b4d597cc4d41f5152fe67a97a40dca9ea092475
     volumes:
       - ./api.py:/app/api.py:ro
     command: ["python", "/app/api.py"]
 
   bridge:
-    image: ubuntu:24.04
+    image: ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11
     volumes:
       - ../../target/debug/reduct-bridge:/usr/local/bin/reduct-bridge:ro
       - ./bridge.toml:/etc/bridge.toml:ro
