@@ -1,6 +1,6 @@
 services:
   reductstore:
-    image: reduct/store:main@sha256:85402f88e8618a14ce0f57b55f53e724463c66d89623d0807f42a860683a92e8
+    image: reduct/store:main
     ports:
       - "8383:8383"
     environment:
@@ -15,7 +15,7 @@ services:
       RS_BUCKET_C_QUOTA_SIZE: 100MB
 
   mosquitto:
-    image: eclipse-mosquitto:2@sha256:6dba0f1b2795ddcbe0d41bdfb8b8d56a423acca23ccde4342a4652be54639b11
+    image: eclipse-mosquitto:2
     ports:
       - "1883:1883"
     volumes:
@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
 
   bridge:
-    image: ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11
+    image: ubuntu:24.04
     volumes:
       - ../../target/debug/reduct-bridge:/usr/local/bin/reduct-bridge:ro
       - ./bridge.toml:/etc/bridge.toml:ro

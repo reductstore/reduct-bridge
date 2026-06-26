@@ -24,8 +24,6 @@ env:
   REGISTRY_IMAGE: reduct/bridge
   AWS_LC_SYS_USE_PREBUILT: 0
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  REDUCT_CLI_VERSION: "0.12.2"
-  REDUCT_CLI_SHA256_X86_64_UNKNOWN_LINUX_GNU: "2acabd6a36a2c424c8088d54a83627cc1bd5a62dc55935d2b0f2d5ba5d815415"
 
 jobs:
   rust_fmt:
@@ -344,8 +342,6 @@ jobs:
           bridge_artifact_name: ${{ matrix.bridge_artifact_name }}
           image_artifact_name: ${{ matrix.image_artifact_name }}
           image_tag: ${{ matrix.image_tag }}
-          reduct_cli_version: ${{ env.REDUCT_CLI_VERSION }}
-          reduct_cli_sha256: ${{ env.REDUCT_CLI_SHA256_X86_64_UNKNOWN_LINUX_GNU }}
           base_image: ${{ matrix.base_image }}
           ros_distro: ${{ matrix.ros_distro }}
 
@@ -513,8 +509,6 @@ jobs:
           target: ${{ matrix.cargo_target }}
           bridge_artifact_name: ${{ matrix.bridge_artifact_name }}
           image_tag: ${{ steps.meta.outputs.tags }}
-          reduct_cli_version: ${{ env.REDUCT_CLI_VERSION }}
-          reduct_cli_sha256: ${{ env.REDUCT_CLI_SHA256_X86_64_UNKNOWN_LINUX_GNU }}
           docker_labels: ${{ steps.meta.outputs.labels }}
           upload_artifact: "false"
           build_outputs: type=image,push=true

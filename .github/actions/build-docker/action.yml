@@ -38,12 +38,6 @@ inputs:
     description: 'ROS distro to install (empty for no ROS).'
     required: false
     default: ''
-  reduct_cli_version:
-    description: 'Pinned reduct-cli release version without the leading v.'
-    required: true
-  reduct_cli_sha256:
-    description: 'Expected SHA-256 for the reduct-cli archive matching the selected target.'
-    required: true
   sbom:
     description: 'Generate SBOM attestation.'
     required: false
@@ -64,39 +58,6 @@ runs:
         name: ${{ inputs.bridge_artifact_name != '' && inputs.bridge_artifact_name || format('reduct-bridge-{0}', inputs.target) }}
         path: /tmp/reduct-bridge/
 
-    - name: Download reduct-cli from pinned release
-      shell: bash
-      run: |
-        set -euo pipefail
-        target="${{ inputs.target }}"
-        version="${{ inputs.reduct_cli_version }}"
-        sha256="${{ inputs.reduct_cli_sha256 }}"
-        ext="tar.gz"
-        if [[ "$target" == *windows* ]]; then
-          ext="zip"
-        fi
-        asset_name="reduct-cli.${target}.${ext}"
-        asset_url="https://github.com/reductstore/reduct-cli/releases/download/v${version}/${asset_name}"
-
-        mkdir -p /tmp/reduct-cli
-        wget -q -O "/tmp/${asset_name}" "$asset_url"
-        echo "${sha256}  /tmp/${asset_name}" | sha256sum -c -
-        echo "Downloaded ${asset_name} from ${asset_url}"
-
-        if [ "$ext" = "zip" ]; then
-          unzip -q "/tmp/${asset_name}" -d /tmp/reduct-cli
-        else
-          tar -xzf "/tmp/${asset_name}" -C /tmp/reduct-cli
-        fi
-
-        REDUCT_CLI_BIN="$(find /tmp/reduct-cli -type f -name reduct-cli | head -n 1)"
-        if [ -z "$REDUCT_CLI_BIN" ]; then
-          echo "reduct-cli binary not found in extracted archive /tmp/${asset_name}"
-          find /tmp/reduct-cli -maxdepth 3 -type f -print || true
-          exit 1
-        fi
-        chmod +x "$REDUCT_CLI_BIN"
-
     - name: Prepare docker build context from artifacts
       shell: bash
       run: |
@@ -106,24 +67,16 @@ runs:
           echo "reduct-bridge binary not found in /tmp/reduct-bridge"
           exit 1
         fi
-        REDUCT_CLI_BIN="$(find /tmp/reduct-cli -type f -name reduct-cli | head -n 1)"
-        if [ -z "$REDUCT_CLI_BIN" ]; then
-          echo "reduct-cli binary not found in /tmp/reduct-cli"
-          exit 1
-        fi
-
         rm -rf .image-build
         mkdir -p .image-build/usr/local/bin .image-build/data
         install -m 0755 "$REDUCT_BRIDGE_BIN" .image-build/usr/local/bin/reduct-bridge
-        install -m 0755 "$REDUCT_CLI_BIN" .image-build/usr/local/bin/reduct-cli
 
     - name: Verify build context binaries
       shell: bash
       run: |
         set -euo pipefail
         test -x .image-build/usr/local/bin/reduct-bridge
-        test -x .image-build/usr/local/bin/reduct-cli
-        ls -l .image-build/usr/local/bin/reduct-bridge .image-build/usr/local/bin/reduct-cli
+        ls -l .image-build/usr/local/bin/reduct-bridge
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3

@@ -50,7 +50,6 @@ COPY --from=builder /etc/gshadow /etc/gshadow
 COPY --chown=10001:10001 --from=builder /data /data
 
 COPY .image-build/usr/local/bin/reduct-bridge /usr/local/bin/reduct-bridge
-COPY .image-build/usr/local/bin/reduct-cli /usr/local/bin/reduct-cli
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

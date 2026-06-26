@@ -27,12 +27,11 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        toolchain="$(python3 - <<'PY'
-        import tomllib
-        with open('rust-toolchain.toml', 'rb') as fh:
-            print(tomllib.load(fh)['toolchain']['channel'])
-        PY
-        )"
+        toolchain="$(sed -nE 's/^channel = "([^"]+)"$/\1/p' rust-toolchain.toml | head -n 1)"
+        if [[ -z "${toolchain}" ]]; then
+          echo "Failed to resolve Rust toolchain from rust-toolchain.toml" >&2
+          exit 1
+        fi
         echo "RUST_TOOLCHAIN=${toolchain}" >> "$GITHUB_ENV"
         echo "RUSTUP_TOOLCHAIN=${toolchain}" >> "$GITHUB_ENV"
 

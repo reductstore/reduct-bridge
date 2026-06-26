@@ -12,7 +12,7 @@ inputs:
   image:
     description: "ReductStore image"
     required: false
-    default: "reduct/store:main@sha256:85402f88e8618a14ce0f57b55f53e724463c66d89623d0807f42a860683a92e8"
+    default: "reduct/store:main"
   log_level:
     description: "RS_LOG_LEVEL value"
     required: false

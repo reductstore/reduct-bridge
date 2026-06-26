@@ -142,7 +142,6 @@ cargo install reduct-bridge
 ```
 
 `cargo install reduct-bridge` builds the default feature set, which includes only the `shell` input.
-The repository pins its development/CI toolchain in [`rust-toolchain.toml`](rust-toolchain.toml); use that exact Rust version for local development instead of a floating `stable` channel.
 For HTTP-specific build and runtime guidance, see [HTTP input documentation](src/input/http/README.md).
 For MQTT-specific build and runtime guidance, see [MQTT input documentation](src/input/mqtt/README.md).
 The MQTT input is grouped under the `iot` Cargo feature alongside future IoT protocols.
