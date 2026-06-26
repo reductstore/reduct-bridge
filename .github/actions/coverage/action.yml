@@ -28,11 +28,11 @@ runs:
       run: |
         set -euo pipefail
         toolchain="$(python3 - <<'PY'
-import tomllib
-with open('rust-toolchain.toml', 'rb') as fh:
-    print(tomllib.load(fh)['toolchain']['channel'])
-PY
-)"
+        import tomllib
+        with open('rust-toolchain.toml', 'rb') as fh:
+            print(tomllib.load(fh)['toolchain']['channel'])
+        PY
+        )"
         echo "RUST_TOOLCHAIN=${toolchain}" >> "$GITHUB_ENV"
         echo "RUSTUP_TOOLCHAIN=${toolchain}" >> "$GITHUB_ENV"
 
