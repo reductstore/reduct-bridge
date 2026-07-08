@@ -2,7 +2,12 @@
 set -euo pipefail
 
 if [ -n "${ROS_DISTRO:-}" ] && [ -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]; then
+    # ROS setup scripts reference variables that may be unset (e.g.
+    # AMENT_TRACE_SETUP_FILES, AMENT_PYTHON_EXECUTABLE), which aborts under
+    # `set -u`. Relax nounset only while sourcing, then restore it.
+    set +u
     source "/opt/ros/${ROS_DISTRO}/setup.bash"
+    set -u
 fi
 
 data_path="${RS_DATA_PATH:-/data}"
