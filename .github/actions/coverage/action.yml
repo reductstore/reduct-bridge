@@ -18,6 +18,12 @@ inputs:
     description: 'Optional ROS setup script to source before cargo commands.'
     required: false
     default: ''
+  access-key-id:
+    description: 'AWS Access Key ID'
+    required: true
+  secret-access-key:
+    description: 'AWS Secret Access Key'
+    required: true
 runs:
   using: 'composite'
   steps:
@@ -45,6 +51,16 @@ runs:
       shell: bash
       run: cargo install cargo-llvm-cov --version 0.8.7 --locked --force
 
+    - name: AWS Credentials and Cargo Cache
+      uses: ./.github/actions/aws-cargo-cache
+      with:
+        os: ${{ inputs.os }}
+        target: ${{ inputs.target }}
+        profile: coverage
+        variant: coverage
+        access-key-id: ${{ inputs.access-key-id }}
+        secret-access-key: ${{ inputs.secret-access-key }}
+
     - name: Run ReductStore integration test (CI feature)
       shell: bash
       env:
@@ -60,6 +76,10 @@ runs:
         fi
         cargo test --locked ${{ inputs.cargo-args }} ci_reductstore_roundtrip_data_and_attachment -- --nocapture
 
+    - name: Show sccache stats after integration test
+      shell: bash
+      run: sccache --show-stats
+
     - name: Run code coverage
       shell: bash
       env:
@@ -74,6 +94,10 @@ runs:
           set -u
         fi
         cargo llvm-cov --locked --workspace ${{ inputs.cargo-args }} --lcov --output-path lcov.info
+
+    - name: Show sccache stats after coverage
+      shell: bash
+      run: sccache --show-stats
 
     - name: Upload coverage artifact
       uses: actions/upload-artifact@v4

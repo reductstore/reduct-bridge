@@ -293,6 +293,8 @@ jobs:
           action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
           cargo-args: --no-default-features --features ci,all-inputs
           ros-setup-script: /opt/ros/jazzy/setup.bash
+          access-key-id: ${{ secrets.S3_CACHE_ACCESS_KEY }}
+          secret-access-key: ${{ secrets.S3_CACHE_SECRET_KEY }}
 
       - name: Upload coverage to Codecov
         continue-on-error: true
