@@ -78,7 +78,12 @@ runs:
 
     - name: Show sccache stats after integration test
       shell: bash
-      run: sccache --show-stats
+      run: |
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --show-stats
+        else
+          echo "sccache is disabled for this build."
+        fi
 
     - name: Run code coverage
       shell: bash
@@ -97,7 +102,12 @@ runs:
 
     - name: Show sccache stats after coverage
       shell: bash
-      run: sccache --show-stats
+      run: |
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --show-stats
+        else
+          echo "sccache is disabled for this build."
+        fi
 
     - name: Upload coverage artifact
       uses: actions/upload-artifact@v4

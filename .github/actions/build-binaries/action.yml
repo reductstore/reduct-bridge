@@ -101,7 +101,12 @@ runs:
     - name: Show sccache stats (PR)
       if: github.event_name == 'pull_request'
       shell: bash
-      run: sccache --show-stats
+      run: |
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --show-stats
+        else
+          echo "sccache is disabled for this build."
+        fi
 
     - name: Upload binary (PR)
       uses: actions/upload-artifact@v4
@@ -126,7 +131,12 @@ runs:
     - name: Show sccache stats (Release)
       if: github.event_name != 'pull_request'
       shell: bash
-      run: sccache --show-stats
+      run: |
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --show-stats
+        else
+          echo "sccache is disabled for this build."
+        fi
 
 
     - name: Upload binary (Release)
@@ -153,7 +163,12 @@ runs:
     - name: Show sccache stats after test export (PR)
       if: github.event_name == 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
       shell: bash
-      run: sccache --show-stats
+      run: |
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --show-stats
+        else
+          echo "sccache is disabled for this build."
+        fi
 
     - name: Build and export tests (Release)
       if: github.event_name != 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
@@ -170,7 +185,12 @@ runs:
     - name: Show sccache stats after test export (Release)
       if: github.event_name != 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
       shell: bash
-      run: sccache --show-stats
+      run: |
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --show-stats
+        else
+          echo "sccache is disabled for this build."
+        fi
 
     - name: Upload tests
       uses: actions/upload-artifact@v4
