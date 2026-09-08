@@ -14,12 +14,19 @@ license: Apache-2.0
 grade: stable
 confinement: strict
 
+plugs:
+  reduct-bridge-configuration:
+    interface: content
+    content: reduct-bridge-configuration-v1
+    target: $SNAP_COMMON/config-provider
+
 apps:
   bin:
     command: bin/reduct-bridge-launch
     plugs:
       - network
       - network-bind
+      - reduct-bridge-configuration
   service:
     command: bin/reduct-bridge-daemon
     daemon: simple
@@ -27,6 +34,7 @@ apps:
     plugs:
       - network
       - network-bind
+      - reduct-bridge-configuration
 
 parts:
   binary:
