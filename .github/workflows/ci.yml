@@ -34,6 +34,14 @@ jobs:
       - name: Check code
         run: cargo fmt --all -- --check
 
+  snap_manifest:
+    runs-on: ubuntu-latest
+    name: Snap manifest tests
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Check generated snapcraft manifests
+        run: python3 -m unittest discover -s .github/actions/snap-release -p 'test_*.py'
+
   build_binaries:
     name: Build Binaries
     runs-on: ${{ matrix.os }}
