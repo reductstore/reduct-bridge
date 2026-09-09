@@ -45,6 +45,7 @@ runs:
 
         echo "=== [reductstore] Starting ${IMAGE} as ${CONTAINER} on ${HOST_PORT} ==="
         docker run -d --rm --name "${CONTAINER}" \
+          -e RS_DISABLE_AUTH=true \
           -e RS_LOG_LEVEL="${LOG_LEVEL}" \
           -p "${HOST_PORT}:8383" \
           "${IMAGE}"

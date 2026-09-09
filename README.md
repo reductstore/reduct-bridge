@@ -124,53 +124,14 @@ sudo snap install reduct-bridge-<build-type> --channel=edge   # or --channel=sta
 
 To run the service with an explicit config file path, set the `config-path` snap option:
 
-```bash
-sudo cp path/to/config.toml /var/snap/reduct-bridge-<build-type>/common/reduct-bridge.toml
-sudo chmod 640 /var/snap/reduct-bridge-<build-type>/common/reduct-bridge.toml
+   ```bash
+   sudo cp path/to/config.toml /var/snap/reduct-bridge/reduct-bridge.toml
+   sudo chmod 640 /var/snap/reduct-bridge/reduct-bridge.toml
 
-sudo snap set reduct-bridge-<build-type> config-path=/var/snap/reduct-bridge-<build-type>/common/reduct-bridge.toml
-sudo snap get reduct-bridge-<build-type> config-path
-sudo snap restart reduct-bridge-<build-type>.service
-```
-
-By default, each snap uses `/var/snap/reduct-bridge-<build-type>/common/config.toml`.
-
-#### Configuration snaps
-
-The ReductBridge snaps also expose an optional `reduct-bridge-configuration` content plug. A separate configuration snap can provide a read-only TOML file with the matching `reduct-bridge-configuration-v1` content label:
-
-```yaml
-slots:
-  reduct-bridge-configuration:
-    interface: content
-    content: reduct-bridge-configuration-v1
-    read:
-      - $SNAP/config
-```
-
-After installing the bridge snap and provider snap, connect the interface and point `config-path` at the mounted file:
-
-```bash
-sudo snap connect reduct-bridge-ros2:reduct-bridge-configuration robot-bridge-config:reduct-bridge-configuration
-sudo snap set reduct-bridge-ros2 config-path=/var/snap/reduct-bridge-ros2/common/config-provider/config.toml
-sudo snap restart reduct-bridge-ros2.service
-```
-
-Use the same plug name and mount path for `reduct-bridge-ros1`, `reduct-bridge-ros2`, and `reduct-bridge-iot`; only the consumer snap name changes. If the content plug is not connected, the generated `$SNAP_COMMON/config.toml` fallback remains unchanged.
-
-For Ubuntu Core images, seed the provider snap alongside ReductBridge and configure gadget defaults and connections with snap IDs:
-
-```yaml
-defaults:
-  <reduct-bridge-snap-id>:
-    config-path: /var/snap/reduct-bridge-ros2/common/config-provider/config.toml
-
-connections:
-  - plug: <reduct-bridge-snap-id>:reduct-bridge-configuration
-    slot: <provider-config-snap-id>:reduct-bridge-configuration
-```
-
-Restart the service after refreshing the provider snap or changing the provided TOML file because ReductBridge reads its configuration at process startup.
+   sudo snap set reduct-bridge-<build-type> config-path=/var/snap/reduct-bridge/commont/reduct-bridge.toml
+   sudo snap get reduct-bridge-<build-type> config-path
+   sudo snap restart reduct-bridge-<build-type>.service
+   ```
 
 Release CI builds snap package variants and publishes them to the standard channels.
 
