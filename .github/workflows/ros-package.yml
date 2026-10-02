@@ -1,0 +1,72 @@
+name: ROS Package
+
+on:
+  push:
+    branches: [main, stable]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  jazzy:
+    name: Jazzy package (amd64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install ROS 2 and package tools
+        uses: ros-tooling/setup-ros@2b7b7e10fd30ff131dfb33248ddd71c5ba31dd30
+        with:
+          required-ros-distributions: jazzy
+
+      - name: Install ROS interfaces and build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-colcon-common-extensions \
+            python3-rosdep \
+            ros-jazzy-example-interfaces \
+            ros-jazzy-test-msgs
+
+      - name: Verify Rust toolchain
+        run: |
+          rustup toolchain install 1.96 --profile minimal
+          rustup default 1.96
+          rustc --version
+          cargo --version
+          rustc --version | grep -Eq '^rustc 1\\.(9[6-9]|[1-9][0-9]{2,})\\.'
+
+      - name: Build Rust package
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +u
+          source /opt/ros/jazzy/setup.bash
+          set -u
+          cargo build --release --locked --no-default-features --features ros2
+
+      - name: Build with colcon
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="${RUNNER_TEMP}/ros2_ws"
+          mkdir -p "${workspace}/src"
+          ln -s "${GITHUB_WORKSPACE}" "${workspace}/src/reduct_bridge"
+          set +u
+          source /opt/ros/jazzy/setup.bash
+          set -u
+          cd "${workspace}"
+          rosdep install --from-paths src --ignore-src -r -y
+          colcon build --packages-select reduct_bridge
+          source install/setup.bash
+          test "$(ros2 pkg prefix reduct_bridge)" = "${workspace}/install/reduct_bridge"
+          ros2 run reduct_bridge reduct-bridge --help
+
+      - name: Run ROS 2 input smoke test
+        uses: ./.github/actions/ros2-input-smoke
+        with:
+          bridge_binary: ${{ runner.temp }}/ros2_ws/install/reduct_bridge/lib/reduct_bridge/reduct-bridge
+          ros-setup-script: ${{ runner.temp }}/ros2_ws/install/setup.bash

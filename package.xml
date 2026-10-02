@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>reduct_bridge</name>
+  <version>0.4.1</version>
+  <description>Streams ROS 2 data into ReductStore.</description>
+
+  <maintainer email="info@reduct.store">ReductSoftware UG</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>cargo</build_depend>
+  <build_depend>cmake</build_depend>
+  <build_depend>rustc</build_depend>
+  <depend>action_msgs</depend>
+  <depend>builtin_interfaces</depend>
+  <depend>example_interfaces</depend>
+  <depend>rcl</depend>
+  <depend>rcl_action</depend>
+  <depend>rcl_interfaces</depend>
+  <depend>rcl_yaml_param_parser</depend>
+  <depend>rcutils</depend>
+  <depend>rmw</depend>
+  <depend>rmw_implementation</depend>
+  <depend>rosgraph_msgs</depend>
+  <depend>rosidl_runtime_c</depend>
+  <depend>test_msgs</depend>
+  <depend>unique_identifier_msgs</depend>
+  <exec_depend>ros_environment</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
