@@ -10,9 +10,21 @@ permissions:
   contents: read
 
 jobs:
-  jazzy:
-    name: Jazzy package (amd64)
-    runs-on: ubuntu-24.04
+  build-package:
+    name: ${{ matrix.ros_distro }} package (amd64)
+    strategy:
+      matrix:
+        include:
+          - artifact_prefix: "bridge-ros2-jazzy"
+            os: ubuntu-24.04
+            ros_distro: "jazzy"
+            ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-humble"
+            os: ubuntu-22.04
+            ros_distro: "humble"
+            ros_setup_script: "/opt/ros/humble/setup.bash"
+
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -20,7 +32,7 @@ jobs:
       - name: Install ROS 2 and package tools
         uses: ros-tooling/setup-ros@649ef6bcd696da05bc27ceb3fab69d810c0daeab
         with:
-          required-ros-distributions: jazzy
+          required-ros-distributions: ${{ matrix.ros_distro }}
 
       - name: Install ROS interfaces and build tools
         run: |
@@ -28,8 +40,8 @@ jobs:
           sudo apt-get install -y \
             python3-colcon-common-extensions \
             python3-rosdep \
-            ros-jazzy-example-interfaces \
-            ros-jazzy-test-msgs
+            ros-${{ matrix.ros_distro }}-example-interfaces \
+            ros-${{ matrix.ros_distro }}-test-msgs
 
       - name: Initialize rosdep
         run: |
@@ -50,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           set +u
-          source /opt/ros/jazzy/setup.bash
+          source ${{ matrix.ros_setup_script }}
           set -u
           cargo build --release --locked --no-default-features --features ros2
 
@@ -62,7 +74,7 @@ jobs:
           mkdir -p "${workspace}/src"
           ln -s "${GITHUB_WORKSPACE}" "${workspace}/src/reduct_bridge"
           set +u
-          source /opt/ros/jazzy/setup.bash
+          source e ${{ matrix.ros_setup_script }}
           set -u
           cd "${workspace}"
           rosdep install --from-paths src --ignore-src -r -y
