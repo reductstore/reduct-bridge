@@ -74,7 +74,7 @@ jobs:
           mkdir -p "${workspace}/src"
           ln -s "${GITHUB_WORKSPACE}" "${workspace}/src/reduct_bridge"
           set +u
-          source e ${{ matrix.ros_setup_script }}
+          source ${{ matrix.ros_setup_script }}
           set -u
           cd "${workspace}"
           rosdep install --from-paths src --ignore-src -r -y
