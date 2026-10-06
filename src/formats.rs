@@ -12,26 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(test, allow(dead_code))]
+
 pub mod json;
+#[cfg(any(feature = "mqtt", feature = "http", test))]
 pub mod protobuf;
 #[cfg(feature = "ros1")]
 pub mod ros1;
 #[cfg(feature = "ros2")]
 pub mod ros2;
 
-use anyhow::Result;
+#[cfg(any(feature = "mqtt", feature = "http", test))]
+use anyhow::{Context, Result};
+#[cfg(any(feature = "mqtt", feature = "http", test))]
 use serde_json::Value;
 
-use anyhow::Context;
-
+#[cfg(any(feature = "mqtt", feature = "http", test))]
 #[derive(Clone, Copy)]
 pub struct DecodeSchema<'a> {
     pub key: &'a str,
     pub type_name: &'a str,
 }
 
+#[cfg(any(feature = "mqtt", feature = "http", test))]
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
 pub enum DecodeFormat<'a> {
     Json,
     Protobuf(DecodeSchema<'a>),
@@ -39,12 +43,14 @@ pub enum DecodeFormat<'a> {
 }
 
 /// Format-specific attachment data (schema, descriptor, etc.)
+#[cfg(any(feature = "mqtt", feature = "http", test))]
 pub struct FormatAttachment {
     pub key: String,
     pub payload: Value,
 }
 
 /// Input context for loading a format attachment payload.
+#[cfg(any(feature = "mqtt", feature = "http", test))]
 pub struct AttachmentContext<'a> {
     pub schema_key: &'a str,
     pub publish_topic: Option<&'a str>,
@@ -55,6 +61,7 @@ pub struct AttachmentContext<'a> {
 ///
 /// Implementations handle decoding payloads, extracting fields,
 /// and providing schema attachments.
+#[cfg(any(feature = "mqtt", feature = "http", test))]
 pub trait FormatHandler: Send + Sync {
     /// Decode a raw payload using explicit format-specific decode instructions.
     fn decode_payload(&self, payload: &[u8], format: DecodeFormat<'_>) -> Option<Value>;
@@ -78,11 +85,13 @@ pub trait FormatHandler: Send + Sync {
     fn build_attachment(&self, context: AttachmentContext<'_>) -> Result<FormatAttachment>;
 }
 
+#[cfg(any(feature = "mqtt", feature = "http", test))]
 pub(crate) struct PayloadFormatHandler {
     json: crate::formats::json::JsonFormatHandler,
     protobuf: Option<crate::formats::protobuf::ProtobufHandler>,
 }
 
+#[cfg(any(feature = "mqtt", feature = "http", test))]
 impl PayloadFormatHandler {
     pub(crate) fn new(protobuf: Option<crate::formats::protobuf::ProtobufHandler>) -> Self {
         Self {
@@ -92,6 +101,7 @@ impl PayloadFormatHandler {
     }
 }
 
+#[cfg(any(feature = "mqtt", feature = "http", test))]
 impl FormatHandler for PayloadFormatHandler {
     fn decode_payload(&self, payload: &[u8], format: DecodeFormat<'_>) -> Option<Value> {
         match format {

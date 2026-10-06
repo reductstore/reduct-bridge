@@ -67,7 +67,9 @@ jobs:
           cd "${workspace}"
           rosdep install --from-paths src --ignore-src -r -y
           colcon build --packages-select reduct_bridge
+          set +u
           source install/setup.bash
+          set -u
           test "$(ros2 pkg prefix reduct_bridge)" = "${workspace}/install/reduct_bridge"
           ros2 run reduct_bridge reduct-bridge --help
 

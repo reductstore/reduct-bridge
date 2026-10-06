@@ -147,6 +147,7 @@ pub fn resolve_from_json(
         .ok_or_else(|| TimeResolutionError::parsing_failed("field", field, format))
 }
 
+#[cfg(any(feature = "mqtt", feature = "http", test))]
 pub fn resolve_from_string(
     value: &str,
     source_kind: &'static str,

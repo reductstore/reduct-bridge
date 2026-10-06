@@ -150,6 +150,7 @@ impl Ros2Instance {
         Self::has_dynamic_labels(&topic.labels) || Self::has_timestamp_field(topic)
     }
 
+    #[cfg(test)]
     pub(super) fn resolve_timestamp(
         message: &Value,
         topic: &Ros2TopicConfig,
