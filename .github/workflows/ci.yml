@@ -86,7 +86,7 @@ jobs:
         run: sudo apt-mark hold firefox snapd
       - name: Install ROS2
         if: ${{ matrix.ros_setup_script != '' }}
-        uses: ros-tooling/setup-ros@2b7b7e10fd30ff131dfb33248ddd71c5ba31dd30
+        uses: ros-tooling/setup-ros@649ef6bcd696da05bc27ceb3fab69d810c0daeab
         with:
           required-ros-distributions: ${{ matrix.ros_distro }}
       - name: Install ROS2 interface packages
@@ -141,7 +141,7 @@ jobs:
         run: sudo apt-mark hold firefox snapd
       - name: Install ROS2
         if: ${{ matrix.ros_setup_script != '' }}
-        uses: ros-tooling/setup-ros@2b7b7e10fd30ff131dfb33248ddd71c5ba31dd30
+        uses: ros-tooling/setup-ros@649ef6bcd696da05bc27ceb3fab69d810c0daeab
         with:
           required-ros-distributions: ${{ matrix.ros_distro }}
       - name: Install ROS2 interface packages
@@ -254,7 +254,7 @@ jobs:
       - name: Prevent apt upgrade from triggering snap store
         run: sudo apt-mark hold firefox snapd
       - name: Install ROS2
-        uses: ros-tooling/setup-ros@2b7b7e10fd30ff131dfb33248ddd71c5ba31dd30
+        uses: ros-tooling/setup-ros@649ef6bcd696da05bc27ceb3fab69d810c0daeab
         with:
           required-ros-distributions: ${{ matrix.ros_distro }}
       - name: Install ROS2 interface packages
@@ -285,7 +285,7 @@ jobs:
       - name: Prevent apt upgrade from triggering snap store
         run: sudo apt-mark hold firefox snapd
       - name: Install ROS2
-        uses: ros-tooling/setup-ros@2b7b7e10fd30ff131dfb33248ddd71c5ba31dd30
+        uses: ros-tooling/setup-ros@649ef6bcd696da05bc27ceb3fab69d810c0daeab
         with:
           required-ros-distributions: jazzy
       - name: Install ROS2 interface packages
