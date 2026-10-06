@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- ROS 2 package metadata and Jazzy CI coverage for building ReductBridge as a ROS package, [PR-62](https://github.com/reductstore/reduct-bridge/pull/62).
+- ROS 2 package metadata and CI coverage for building ReductBridge as a ROS package, [PR-62](https://github.com/reductstore/reduct-bridge/pull/62).
 - Snap packages now expose an optional `reduct-bridge-configuration` content plug for provider snaps that supply read-only TOML configuration files, [PR-60](https://github.com/reductstore/reduct-bridge/pull/60).
 
 ## 0.4.1 - 2026-07-14
