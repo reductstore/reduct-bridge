@@ -27,6 +27,8 @@ use crate::pipeline::PipelineBuilder;
 use crate::remote::RemoteBuilder;
 use anyhow::Context;
 use log::info;
+use std::env;
+use std::process::exit;
 
 #[cfg(unix)]
 async fn wait_for_shutdown_signal() -> anyhow::Result<&'static str> {
@@ -56,6 +58,16 @@ async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
         .format_timestamp_millis()
         .init();
+
+    if env::args().any(|arg| matches!(arg.as_ref(), "--help" | "-h")) {
+        println!("Usage: reduct-bridge <path-to-config.toml>");
+        exit(0)
+    }
+
+    if env::args().any(|arg| matches!(arg.as_ref(), "--version" | "-V")) {
+        println!(env!("CARGO_PKG_VERSION"));
+        exit(0)
+    }
 
     let config_path = std::env::args()
         .nth(1)
