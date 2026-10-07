@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.5.0 - 2026-10-07
+
 ### Added
 
 - Optional per-topic `qos = { reliability, durability, depth }` for the ROS2 input, so latched (`transient_local`) and `best_effort` publishers can be recorded, [PR-63](https://github.com/reductstore/reduct-bridge/pull/63).

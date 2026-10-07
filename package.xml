@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>reduct_bridge</name>
-  <version>0.4.1</version>
+  <version>0.5.0</version>
   <description>Streams ROS 2 data into ReductStore.</description>
 
   <maintainer email="info@reduct.store">ReductSoftware UG</maintainer>
