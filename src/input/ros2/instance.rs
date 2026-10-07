@@ -26,6 +26,8 @@ use tokio::sync::mpsc::Sender;
 const DEFAULT_QUEUE_SIZE: usize = 128;
 const TOPIC_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const TOPIC_DISCOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(200);
+/// How often a topic that is not yet published is looked for again.
+const PENDING_TOPIC_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 fn default_queue_size() -> usize {
     DEFAULT_QUEUE_SIZE
@@ -52,6 +54,51 @@ pub struct Ros2TopicConfig {
     pub labels: Vec<Ros2LabelRule>,
     #[serde(default)]
     pub timestamp: Option<TimestampMapping>,
+    /// Subscription QoS. Anything left out keeps the ROS default: reliable,
+    /// volatile, and the input's `queue_size` as depth.
+    #[serde(default)]
+    pub qos: Ros2QosConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Ros2QosConfig {
+    #[serde(default)]
+    pub reliability: Option<Ros2Reliability>,
+    /// `transient_local` receives the last message(s) a latched publisher sent
+    /// before this subscription existed, e.g. `/tf_static` or a map.
+    #[serde(default)]
+    pub durability: Option<Ros2Durability>,
+    #[serde(default)]
+    pub depth: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Ros2Reliability {
+    Reliable,
+    BestEffort,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Ros2Durability {
+    Volatile,
+    TransientLocal,
+}
+
+impl Ros2QosConfig {
+    pub(super) fn profile(&self, queue_size: u32) -> QoSProfile {
+        let mut qos = QoSProfile::default().keep_last(self.depth.unwrap_or(queue_size));
+        qos = match self.reliability {
+            Some(Ros2Reliability::BestEffort) => qos.best_effort(),
+            Some(Ros2Reliability::Reliable) | None => qos.reliable(),
+        };
+        match self.durability {
+            Some(Ros2Durability::TransientLocal) => qos.transient_local(),
+            Some(Ros2Durability::Volatile) | None => qos.volatile(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -411,37 +458,6 @@ impl Ros2Instance {
             })
     }
 
-    pub(super) fn wait_for_topic_type(
-        node: &rclrs::Node,
-        topic_name: &str,
-    ) -> Result<String, Error> {
-        let started = Instant::now();
-        let mut last_err = None;
-
-        while started.elapsed() < TOPIC_DISCOVERY_TIMEOUT {
-            match wildcard::topic_types_by_name(node)
-                .and_then(|topic_types| Self::select_topic_type(topic_name, &topic_types))
-            {
-                Ok(topic_type) => return Ok(topic_type),
-                Err(err) => last_err = Some(err),
-            }
-
-            std::thread::sleep(TOPIC_DISCOVERY_RETRY_INTERVAL);
-        }
-
-        let last_err = last_err.unwrap_or_else(|| {
-            anyhow!(
-                "No ROS2 message type found for topic '{}' within {:?}",
-                topic_name,
-                TOPIC_DISCOVERY_TIMEOUT
-            )
-        });
-        Err(last_err.context(format!(
-            "Failed to discover ROS2 topic type for '{}'",
-            topic_name
-        )))
-    }
-
     pub(super) fn wait_for_resolved_topics(
         node: &rclrs::Node,
         configured_topics: &[Ros2TopicConfig],
@@ -506,6 +522,83 @@ impl Ros2Instance {
             }
 
             std::thread::sleep(TOPIC_DISCOVERY_RETRY_INTERVAL);
+        }
+    }
+
+    /// Subscribe to every `pending` topic the graph advertises now, and leave
+    /// the rest in `pending`. A topic that fails to subscribe is dropped: it
+    /// is advertised, so retrying would fail the same way.
+    fn subscribe_advertised(
+        node: &rclrs::Node,
+        pending: &mut Vec<Ros2TopicConfig>,
+        subscriptions: &mut Vec<rclrs::SerializedSubscription>,
+        worker_cfg: &Ros2Config,
+        pipeline_tx: &Sender<Message>,
+    ) {
+        let Ok(topic_types) = wildcard::topic_types_by_name(node) else {
+            return;
+        };
+        pending.retain(|topic_cfg| {
+            let Ok(topic_type) = Self::select_topic_type(&topic_cfg.name, &topic_types) else {
+                return true;
+            };
+            if let Some(subscription) =
+                Self::subscribe_topic(node, topic_cfg, &topic_type, worker_cfg, pipeline_tx)
+            {
+                subscriptions.push(subscription);
+            }
+            false
+        });
+    }
+
+    /// Subscribe to one topic. A failure (no schema, bad type) is logged and
+    /// skips that topic only, rather than stopping every other topic's
+    /// recording with it.
+    fn subscribe_topic(
+        node: &rclrs::Node,
+        topic_cfg: &Ros2TopicConfig,
+        topic_type: &str,
+        worker_cfg: &Ros2Config,
+        pipeline_tx: &Sender<Message>,
+    ) -> Option<rclrs::SerializedSubscription> {
+        let result = (|| -> Result<rclrs::SerializedSubscription, Error> {
+            let (topic_type, runtime) = Self::prepare_topic_runtime(
+                topic_cfg,
+                topic_type,
+                &worker_cfg.schema_paths,
+                pipeline_tx,
+            )?;
+            let callback = move |payload: Vec<u8>, info: MessageInfo| {
+                runtime.handle_payload(payload, Self::message_info_timestamp_us(&info));
+            };
+            let mut options = SubscriptionOptions::new(topic_cfg.name.as_str());
+            options.qos = topic_cfg.qos.profile(worker_cfg.queue_size as u32);
+            node.create_serialized_subscription(
+                MessageTypeName::try_from(topic_type.as_str())?,
+                options,
+                callback,
+            )
+            .map_err(|err| {
+                anyhow!(
+                    "Failed to subscribe to ROS2 topic '{}' [{}]: {}",
+                    topic_cfg.name,
+                    topic_type,
+                    err
+                )
+            })
+        })();
+        match result {
+            Ok(subscription) => {
+                info!(
+                    "Subscribed to ROS2 topic '{}' [{}]",
+                    topic_cfg.name, topic_type
+                );
+                Some(subscription)
+            }
+            Err(err) => {
+                warn!("Not recording ROS2 topic '{}': {:#}", topic_cfg.name, err);
+                None
+            }
         }
     }
 
@@ -574,49 +667,37 @@ impl Ros2Instance {
                         );
                     }
 
+                    // A topic nobody publishes yet is not an error: one config
+                    // serves several robot variants, and a node that starts after
+                    // the bridge still has to be recorded. Subscribe to what is
+                    // advertised now, and look for the rest while spinning.
                     let mut subscriptions = Vec::new();
-
-                    for topic_cfg in resolved_topics {
-                        let topic_name = topic_cfg.name.clone();
-                        let topic_type = Self::wait_for_topic_type(&node, &topic_name)?;
-                        let (topic_type, runtime) = Self::prepare_topic_runtime(
-                            &topic_cfg,
-                            &topic_type,
-                            &worker_cfg.schema_paths,
-                            &pipeline_tx,
-                        )?;
-
-                        let callback = {
-                            let runtime = runtime.clone();
-                            move |payload: Vec<u8>, info: MessageInfo| {
-                                runtime.handle_payload(payload, Self::message_info_timestamp_us(&info));
-                            }
-                        };
-
-                        let mut options = SubscriptionOptions::new(topic_cfg.name.as_str());
-                        options.qos = QoSProfile::default().keep_last(worker_cfg.queue_size as u32);
-
-                        let subscription = node
-                            .create_serialized_subscription(
-                                MessageTypeName::try_from(topic_type.as_str())?,
-                                options,
-                                callback,
-                            )
-                            .map_err(|err| {
-                                anyhow!(
-                                    "Failed to subscribe to ROS2 topic '{}' [{}]: {}",
-                                    topic_cfg.name,
-                                    topic_type,
-                                    err
-                                )
-                            })?;
-
-                        subscriptions.push(subscription);
-                    }
+                    let mut pending = resolved_topics;
+                    let started = Instant::now();
+                    let mut warned_missing = false;
+                    Self::subscribe_advertised(
+                        &node, &mut pending, &mut subscriptions, &worker_cfg, &pipeline_tx,
+                    );
+                    let mut next_pending_check = Instant::now() + PENDING_TOPIC_RETRY_INTERVAL;
 
                     let _ = ready_tx.send(Ok(()));
 
                     while !thread_stop.load(Ordering::Relaxed) {
+                        if !pending.is_empty() && Instant::now() >= next_pending_check {
+                            next_pending_check = Instant::now() + PENDING_TOPIC_RETRY_INTERVAL;
+                            Self::subscribe_advertised(
+                                &node, &mut pending, &mut subscriptions, &worker_cfg, &pipeline_tx,
+                            );
+                            if !warned_missing && started.elapsed() >= TOPIC_DISCOVERY_TIMEOUT {
+                                warned_missing = true;
+                                for topic_cfg in &pending {
+                                    warn!(
+                                        "ROS2 topic '{}' is not published after {:?}; subscribing when it appears",
+                                        topic_cfg.name, TOPIC_DISCOVERY_TIMEOUT
+                                    );
+                                }
+                            }
+                        }
                         let errors =
                             executor.spin(SpinOptions::spin_once().timeout(Duration::from_millis(200)));
                         for err in errors {
@@ -640,7 +721,7 @@ impl Ros2Instance {
 
 #[cfg(test)]
 mod tests {
-    use super::{Ros2Instance, Ros2LabelRule, Ros2TopicConfig};
+    use super::{Ros2Instance, Ros2LabelRule, Ros2QosConfig, Ros2TopicConfig};
     use crate::timestamp::{TimestampFormat, TimestampMapping};
     use rstest::{fixture, rstest};
     use serde_json::json;
@@ -715,6 +796,7 @@ mod tests {
             name: "/camera/image".to_string(),
             entry_name: None,
             labels: Vec::new(),
+            qos: Default::default(),
             timestamp: Some(TimestampMapping {
                 field: Some("header.stamp".to_string()),
                 property: None,
@@ -733,6 +815,7 @@ mod tests {
             name: "/camera/image".to_string(),
             entry_name: None,
             labels: Vec::new(),
+            qos: Default::default(),
             timestamp: Some(TimestampMapping {
                 field: Some("header.stamp".to_string()),
                 property: None,
@@ -768,6 +851,44 @@ mod tests {
 
         let picked = Ros2Instance::select_topic_type("/camera/image", &topic_types).unwrap();
         assert_eq!(picked, "sensor_msgs/msg/Image");
+    }
+
+    #[test]
+    fn qos_defaults_to_reliable_volatile_at_the_queue_depth() {
+        let topic: Ros2TopicConfig = toml::from_str("name = \"/tf\"").unwrap();
+        assert_eq!(topic.qos, Ros2QosConfig::default());
+        let qos = topic.qos.profile(7);
+        assert_eq!(qos.history, rclrs::QoSHistoryPolicy::KeepLast { depth: 7 });
+        assert_eq!(qos.reliability, rclrs::QoSReliabilityPolicy::Reliable);
+        assert_eq!(qos.durability, rclrs::QoSDurabilityPolicy::Volatile);
+    }
+
+    #[test]
+    fn qos_parses_a_latched_best_effort_topic() {
+        let topic: Ros2TopicConfig = toml::from_str(
+            "name = \"/map\"\nqos = { reliability = \"best_effort\", durability = \"transient_local\", depth = 1 }",
+        )
+        .unwrap();
+        let qos = topic.qos.profile(128);
+        assert_eq!(qos.history, rclrs::QoSHistoryPolicy::KeepLast { depth: 1 });
+        assert_eq!(qos.reliability, rclrs::QoSReliabilityPolicy::BestEffort);
+        assert_eq!(qos.durability, rclrs::QoSDurabilityPolicy::TransientLocal);
+    }
+
+    #[test]
+    fn qos_rejects_an_unknown_policy() {
+        assert!(
+            toml::from_str::<Ros2TopicConfig>(
+                "name = \"/map\"\nqos = { durability = \"latched\" }"
+            )
+            .is_err()
+        );
+        assert!(
+            toml::from_str::<Ros2TopicConfig>(
+                "name = \"/map\"\nqos = { durabilty = \"transient_local\" }"
+            )
+            .is_err()
+        );
     }
 
     #[rstest]

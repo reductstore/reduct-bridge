@@ -57,7 +57,33 @@ labels = [
 # Optional timestamp mapping. If extraction fails, the middleware/ingest fallback is used.
 # For standard ROS headers, use header.stamp with ros_stamp format.
 timestamp = { field = "header.stamp", format = "ros_stamp" }
+
+# Optional subscription QoS. Anything left out keeps the ROS default:
+# reliable, volatile, and the input's queue_size as depth.
+#   reliability = "reliable" | "best_effort"
+#   durability  = "volatile" | "transient_local"
+#   depth       = <u32>
+# A subscription only receives from a publisher whose QoS is compatible, so
+# these have to match the publisher, not a preference.
+qos = { reliability = "reliable", durability = "volatile", depth = 128 }
 ```
+
+## Topic QoS
+
+Two cases need a QoS other than the default:
+
+- **Latched topics.** `/tf_static`, a map, or a robot description is published
+  once with `transient_local` durability and then never again. A `volatile`
+  subscription that starts afterwards receives nothing, so the entry stays
+  empty for the life of the run. Set
+  `qos = { durability = "transient_local" }`.
+- **Sensor data.** Scans, images and point clouds are commonly published
+  `best_effort`. A `reliable` subscription is incompatible with a
+  `best_effort` publisher and never matches it, so again nothing arrives. Set
+  `qos = { reliability = "best_effort" }`.
+
+An incompatible pair is not an error: the subscription is created and simply
+stays unmatched, which is why this reads as "the topic records nothing".
 
 ## Build
 
@@ -72,6 +98,12 @@ The ROS2 installation must include the standard interface packages that `rclrs` 
 
 ## Runtime Notes
 
+- Topics do not have to exist when the bridge starts. Whatever is advertised
+  is subscribed immediately; the rest is retried once a second and subscribed
+  as it appears, so a node started after the bridge is still recorded. A topic
+  still missing after 10 s is warned about once, and the input keeps running.
+- A topic that fails to subscribe, for example one whose schema cannot be
+  resolved, is logged and skipped. The other topics are unaffected.
 - Empty topic names are not allowed.
 - `entry_name` cannot be empty when explicitly set.
 - `schema_paths` is optional. If set, those paths are used first.
@@ -97,4 +129,6 @@ reduct-bridge /etc/reduct-bridge/reduct-bridge.toml
 
 ## Changes
 
+- Unreleased: per-topic `qos`, and topics are subscribed as they appear
+  instead of the input failing when one is not advertised within 10 s.
 - `v0.1.0`: ROS2 input introduced.

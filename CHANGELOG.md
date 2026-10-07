@@ -9,8 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Optional per-topic `qos = { reliability, durability, depth }` for the ROS2 input, so latched (`transient_local`) and `best_effort` publishers can be recorded, [PR-63](https://github.com/reductstore/reduct-bridge/pull/63).
 - ROS 2 package metadata and CI coverage for building ReductBridge as a ROS package, [PR-62](https://github.com/reductstore/reduct-bridge/pull/62).
 - Snap packages now expose an optional `reduct-bridge-configuration` content plug for provider snaps that supply read-only TOML configuration files, [PR-60](https://github.com/reductstore/reduct-bridge/pull/60).
+
+### Fixed
+
+- The ROS2 input no longer fails when a configured topic is not advertised within 10 seconds. Advertised topics are subscribed immediately, the rest are retried once a second and subscribed as they appear, and a topic that fails to subscribe is skipped instead of stopping the others, [PR-63](https://github.com/reductstore/reduct-bridge/pull/63).
 
 ## 0.4.1 - 2026-07-14
 

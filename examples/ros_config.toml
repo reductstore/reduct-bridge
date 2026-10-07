@@ -78,6 +78,23 @@ labels = [
 # Optional timestamp mapping. For standard ROS headers, use header.stamp with ros_stamp.
 timestamp = { field = "header.stamp", format = "ros_stamp" }
 
+# Optional subscription QoS (per topic). Omitted fields keep the ROS default:
+# reliable, volatile, and the input's queue_size as depth.
+# A latched publisher (/tf_static, a map, a URDF) sends its message once, often
+# before the bridge starts, so a volatile subscription never sees it. Match it
+# with transient_local.
+[[inputs.ros2.ros2_local.topics]]
+name = "/tf_static"
+entry_name = "tf_static"
+qos = { durability = "transient_local", depth = 16 }
+
+# Sensor-data publishers are usually best_effort, and a reliable subscription
+# does not match them, so it receives nothing.
+[[inputs.ros2.ros2_local.topics]]
+name = "/scan"
+entry_name = "scan"
+qos = { reliability = "best_effort" }
+
 
 # Shell inputs
 [inputs.shell.shell_timestamp]

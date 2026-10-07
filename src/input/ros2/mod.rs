@@ -107,6 +107,7 @@ mod tests {
             name: "/sensor/imu".to_string(),
             entry_name: None,
             labels: Vec::new(),
+            qos: Default::default(),
             timestamp,
         }
     }
