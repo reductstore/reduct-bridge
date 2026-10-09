@@ -28,7 +28,36 @@ use crate::remote::RemoteBuilder;
 use anyhow::Context;
 use log::info;
 use std::env;
-use std::process::exit;
+
+const USAGE: &str = "Usage: reduct-bridge <path-to-config.toml>";
+
+#[derive(Debug, PartialEq)]
+enum Command {
+    Help,
+    Version,
+    Run(String),
+}
+
+fn parse_command(args: impl IntoIterator<Item = String>) -> anyhow::Result<Command> {
+    let args = args.into_iter().collect::<Vec<_>>();
+
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+    {
+        return Ok(Command::Help);
+    }
+
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--version" | "-V"))
+    {
+        return Ok(Command::Version);
+    }
+
+    let config_path = args.into_iter().next().context(USAGE)?;
+    Ok(Command::Run(config_path))
+}
 
 #[cfg(unix)]
 async fn wait_for_shutdown_signal() -> anyhow::Result<&'static str> {
@@ -53,28 +82,10 @@ async fn wait_for_shutdown_signal() -> anyhow::Result<&'static str> {
     Ok("Ctrl+C")
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
-        .format_timestamp_millis()
-        .init();
-
-    if env::args().any(|arg| matches!(arg.as_ref(), "--help" | "-h")) {
-        println!("Usage: reduct-bridge <path-to-config.toml>");
-        exit(0)
-    }
-
-    if env::args().any(|arg| matches!(arg.as_ref(), "--version" | "-V")) {
-        println!(env!("CARGO_PKG_VERSION"));
-        exit(0)
-    }
-
-    let config_path = std::env::args()
-        .nth(1)
-        .context("Usage: reduct-bridge <path-to-config.toml>")?;
+async fn run(config_path: &str) -> anyhow::Result<()> {
     info!("Starting reduct-bridge with config: {}", config_path);
 
-    let config = parse_config_file(&config_path)?;
+    let config = parse_config_file(config_path)?;
 
     let runtime = PipelineBuilder::new()
         .build(&config, &InputBuilder::new(), &RemoteBuilder::new())
@@ -89,4 +100,77 @@ async fn main() -> anyhow::Result<()> {
     info!("Shutdown complete");
 
     Ok(())
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> anyhow::Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
+        .format_timestamp_millis()
+        .init();
+
+    match parse_command(env::args().skip(1))? {
+        Command::Help => println!("{USAGE}"),
+        Command::Version => println!(env!("CARGO_PKG_VERSION")),
+        Command::Run(config_path) => run(&config_path).await?,
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn parses_help_flags() {
+        assert_eq!(parse_command(args(&["--help"])).unwrap(), Command::Help);
+        assert_eq!(parse_command(args(&["-h"])).unwrap(), Command::Help);
+        assert_eq!(
+            parse_command(args(&["bridge.toml", "--help"])).unwrap(),
+            Command::Help
+        );
+    }
+
+    #[test]
+    fn parses_version_flags() {
+        assert_eq!(
+            parse_command(args(&["--version"])).unwrap(),
+            Command::Version
+        );
+        assert_eq!(parse_command(args(&["-V"])).unwrap(), Command::Version);
+    }
+
+    #[test]
+    fn parses_config_path() {
+        assert_eq!(
+            parse_command(args(&["bridge.toml"])).unwrap(),
+            Command::Run("bridge.toml".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_missing_config_path() {
+        assert_eq!(parse_command(Vec::new()).unwrap_err().to_string(), USAGE);
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_config_before_starting_pipeline() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = env::temp_dir().join(format!("reduct-bridge-invalid-{unique}.toml"));
+        fs::write(&path, "this is not valid TOML = [").unwrap();
+
+        let error = run(path.to_str().unwrap()).await.unwrap_err();
+
+        fs::remove_file(path).unwrap();
+        assert!(!error.to_string().is_empty());
+    }
 }
