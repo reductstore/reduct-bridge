@@ -78,7 +78,10 @@ jobs:
           set -u
           cd "${workspace}"
           rosdep install --from-paths src --ignore-src -r -y
-          colcon build --packages-select reduct_bridge
+          # Exercise the ROS build-farm path, where only the distribution's
+          # system Cargo is initially available.
+          env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            colcon build --packages-select reduct_bridge
           set +u
           source install/setup.bash
           set -u
