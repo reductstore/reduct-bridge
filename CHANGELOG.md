@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.5.1 - 2026-10-10
+
 ### Fixed
 
 - ROS package builds now use the pinned Rust toolchain instead of the distribution's outdated system Cargo, [PR-66](https://github.com/reductstore/reduct-bridge/pull/66).
