@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Regression coverage for the main CLI startup, help, version, invalid configuration, and shutdown paths, [PR-67](https://github.com/reductstore/reduct-bridge/pull/67).
+
 ## 0.5.1 - 2026-10-10
 
 ### Fixed
