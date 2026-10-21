@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Regression coverage for the main CLI startup, help, version, invalid configuration, and shutdown paths, [PR-67](https://github.com/reductstore/reduct-bridge/pull/67).
 
+### Fixed
+
+- Source archives exclude the repository-only `.kilo` tooling directory so ROS Bloom imports are not blocked by ignore rules, [PR-68](https://github.com/reductstore/reduct-bridge/pull/68).
+
 ## 0.5.1 - 2026-10-10
 
 ### Fixed
