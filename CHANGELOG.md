@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.5.3 - 2026-10-27
+
 ### Fixed
 
 - ROS Bloom upstream imports no longer fail on repository-local `.kilo` tooling files, [PR-69](https://github.com/reductstore/reduct-bridge/pull/69).
