@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.5.5 - 2026-10-28
+
 ### Added
 
 - ROS 2 Lyrical CI, ROS package validation, release archives, Docker images, and installation documentation, [PR-72](https://github.com/reductstore/reduct-bridge/pull/72).
