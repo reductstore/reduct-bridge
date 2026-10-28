@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- ROS build-farm packaging no longer requires the redundant direct `action_msgs` package and disables AWS-LC's optional jitter entropy source to avoid optimized arm64 builds failing, [PR-71](https://github.com/reductstore/reduct-bridge/pull/71).
+
 ## 0.5.4 - 2026-10-27
 
 - Fix ros package version
