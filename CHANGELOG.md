@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.5.6 - 2026-10-28
+
+### Fixed
+
+- ROS Bloom package builds now install the `ros_environment` build dependency and CI validates generated Debian packages for every supported ROS 2 distribution, [PR-73](https://github.com/reductstore/reduct-bridge/pull/73).
+
 ## 0.5.5 - 2026-10-28
 
 ### Added
