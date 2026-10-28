@@ -15,6 +15,10 @@ jobs:
     strategy:
       matrix:
         include:
+          - artifact_prefix: "bridge-ros2-lyrical"
+            os: ubuntu-26.04
+            ros_distro: "lyrical"
+            ros_setup_script: "/opt/ros/lyrical/setup.bash"
           - artifact_prefix: "bridge-ros2-jazzy"
             os: ubuntu-24.04
             ros_distro: "jazzy"
@@ -23,7 +27,6 @@ jobs:
             os: ubuntu-22.04
             ros_distro: "humble"
             ros_setup_script: "/opt/ros/humble/setup.bash"
-
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:

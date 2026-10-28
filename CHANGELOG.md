@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- ROS 2 Lyrical CI, ROS package validation, release archives, Docker images, and installation documentation, [PR-72](https://github.com/reductstore/reduct-bridge/pull/72).
+
 ### Fixed
 
 - ROS build-farm packaging no longer requires the redundant direct `action_msgs` package and disables AWS-LC's optional jitter entropy source to avoid optimized arm64 builds failing, [PR-71](https://github.com/reductstore/reduct-bridge/pull/71).

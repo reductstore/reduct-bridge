@@ -116,8 +116,8 @@ labels = [
 ]
 ```
 
-`entry_name`, `content_type`, and `labels` are configured per topic. `content_type` 
-is used as the default record content type when an MQTT v5 publish does not provide 
+`entry_name`, `content_type`, and `labels` are configured per topic. `content_type`
+is used as the default record content type when an MQTT v5 publish does not provide
 a `content_type` property; for MQTT v3 it is used directly. Use bare names such as
 `tenant`, `status`, or `id` for MQTT v5 user properties.
 `schema_path` and `schema_name` must be set together.

@@ -1,6 +1,6 @@
 [package]
 name = "reduct-bridge"
-version = "0.5.4"
+version = "0.5.5"
 edition = "2024"
 rust-version = "1.96"
 
@@ -42,7 +42,7 @@ serde_json = "1.0.145"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 url = "2.5.7"
 rosrust = { version = "0.9.13", optional = true, git = "https://github.com/reductstore/rosrust.git", tag = "v0.9.13" }
-rclrs = { git = "https://github.com/reductstore/ros2_rust", optional = true, version = "0.7.0" }
+rclrs = { git = "https://github.com/reductstore/ros2_rust", rev = "3660df5", optional = true, version = "0.7.0" }
 ros2_message = { git = "https://github.com/reductstore/ros2_message", optional = true, version = "0.1.1" }
 systemstat = { version = "0.2.6", optional = true }
 rumqttc = { version = "0.25.1", optional = true }
