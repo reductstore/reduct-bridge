@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>reduct_bridge</name>
-  <version>0.5.5</version>
+  <version>0.5.6</version>
   <description>Streams ROS 2 data into ReductStore.</description>
 
   <maintainer email="info@reduct.store">ReductSoftware UG</maintainer>
@@ -25,7 +25,7 @@
   <depend>rosidl_runtime_c</depend>
   <depend>test_msgs</depend>
   <depend>unique_identifier_msgs</depend>
-  <exec_depend>ros_environment</exec_depend>
+  <depend>ros_environment</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

@@ -41,6 +41,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            debhelper \
+            devscripts \
+            equivs \
+            python3-bloom \
             python3-colcon-common-extensions \
             python3-rosdep \
             ros-${{ matrix.ros_distro }}-example-interfaces \
@@ -59,6 +63,45 @@ jobs:
           rustc --version
           cargo --version
           rustc --version | grep -Eq '^rustc 1\.96\.'
+
+      - name: Build Bloom Debian package
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="${RUNNER_TEMP}/bloom_package"
+          mkdir -p "${package_dir}"
+          cp -a "${GITHUB_WORKSPACE}/." "${package_dir}/"
+          cd "${package_dir}"
+
+          os_codename="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME}")"
+          bloom-generate rosdebian \
+            --ros-distro "${{ matrix.ros_distro }}" \
+            --os-name ubuntu \
+            --os-version "${os_codename}"
+
+          expected_dependency="ros-${{ matrix.ros_distro }}-ros-environment"
+          build_dependencies="$(grep '^Build-Depends:' debian/control)"
+          if [[ "${build_dependencies}" != *"${expected_dependency}"* ]]; then
+            echo "Bloom did not add ${expected_dependency} to Build-Depends"
+            exit 1
+          fi
+
+          sudo mk-build-deps \
+            --install \
+            --remove \
+            --tool "apt-get --no-install-recommends -y" \
+            debian/control
+
+          # Match the build farm: the generated rules must source the ROS
+          # environment instead of inheriting it from the GitHub runner.
+          env \
+            -u AMENT_PREFIX_PATH \
+            -u CMAKE_PREFIX_PATH \
+            -u COLCON_PREFIX_PATH \
+            -u LD_LIBRARY_PATH \
+            -u PYTHONPATH \
+            -u ROS_DISTRO \
+            dpkg-buildpackage -b -us -uc -Pnocheck
 
       - name: Build Rust package
         shell: bash
