@@ -64,6 +64,13 @@ jobs:
             cargo_args: "--no-default-features --features ros2"
             ros_distro: "jazzy"
             ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-lyrical"
+            target: "x86_64-unknown-linux-gnu"
+            os: ubuntu-26.04
+            compiler: "gcc"
+            cargo_args: "--no-default-features --features ros2"
+            ros_distro: "lyrical"
+            ros_setup_script: "/opt/ros/lyrical/setup.bash"
           - artifact_prefix: "bridge-ros2-humble"
             target: "x86_64-unknown-linux-gnu"
             os: ubuntu-22.04
@@ -122,6 +129,10 @@ jobs:
             os: ubuntu-24.04
             ros_distro: "jazzy"
             ros_setup_script: "/opt/ros/jazzy/setup.bash"
+          - artifact_prefix: "bridge-ros2-lyrical"
+            os: ubuntu-26.04
+            ros_distro: "lyrical"
+            ros_setup_script: "/opt/ros/lyrical/setup.bash"
           - artifact_prefix: "bridge-ros2-humble"
             os: ubuntu-22.04
             ros_distro: "humble"
@@ -240,6 +251,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - artifact_prefix: "bridge-ros2-lyrical"
+            os: ubuntu-26.04
+            ros_distro: "lyrical"
+            ros_setup_script: "/opt/ros/lyrical/setup.bash"
           - artifact_prefix: "bridge-ros2-jazzy"
             os: ubuntu-24.04
             ros_distro: "jazzy"
@@ -332,6 +347,11 @@ jobs:
             image_tag: reduct/bridge:ros2-jazzy-test
             base_image: ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11
             ros_distro: jazzy
+          - image_artifact_name: image-ros2-lyrical-linux-amd64
+            bridge_artifact_name: bridge-ros2-lyrical-x86_64-unknown-linux-gnu
+            image_tag: reduct/bridge:ros2-lyrical-test
+            base_image: ubuntu:26.04@sha256:0e73b71479e7bc5f006bca872e25c3cd680dc052a0116f90d63ae363537db0dd
+            ros_distro: lyrical
           - image_artifact_name: image-ros2-humble-linux-amd64
             bridge_artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
             image_tag: reduct/bridge:ros2-humble-test
@@ -448,6 +468,8 @@ jobs:
             asset_name: bridge-ros1.x86_64-unknown-linux-gnu.tar.gz
           - artifact_name: bridge-ros2-jazzy-x86_64-unknown-linux-gnu
             asset_name: bridge-ros2-jazzy.x86_64-unknown-linux-gnu.tar.gz
+          - artifact_name: bridge-ros2-lyrical-x86_64-unknown-linux-gnu
+            asset_name: bridge-ros2-lyrical.x86_64-unknown-linux-gnu.tar.gz
           - artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
             asset_name: bridge-ros2-humble.x86_64-unknown-linux-gnu.tar.gz
           - artifact_name: bridge-iot-x86_64-unknown-linux-gnu
@@ -499,6 +521,13 @@ jobs:
             image_suffix: ros2-jazzy
             base_image: ubuntu:24.04@sha256:023f8a753c22258c9fe2d0005a7d28258038da7d620e9f93e9ad78aa266f9f11
             ros_distro: jazzy
+          - platform: linux/amd64
+            cargo_target: x86_64-unknown-linux-gnu
+            bridge_artifact_name: bridge-ros2-lyrical-x86_64-unknown-linux-gnu
+            image_name: reduct/bridge
+            image_suffix: ros2-lyrical
+            base_image: ubuntu:26.04@sha256:0e73b71479e7bc5f006bca872e25c3cd680dc052a0116f90d63ae363537db0dd
+            ros_distro: lyrical
           - platform: linux/amd64
             cargo_target: x86_64-unknown-linux-gnu
             bridge_artifact_name: bridge-ros2-humble-x86_64-unknown-linux-gnu
