@@ -25,7 +25,7 @@
   <depend>rosidl_runtime_c</depend>
   <depend>test_msgs</depend>
   <depend>unique_identifier_msgs</depend>
-  <exec_depend>ros_environment</exec_depend>
+  <depend>ros_environment</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
