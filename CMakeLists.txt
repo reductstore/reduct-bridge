@@ -86,6 +86,10 @@ add_custom_command(
     COMMAND
         "${CMAKE_COMMAND}" -E env
         ${RUSTUP_ENV}
+        # Debian's trailing optimization flags override the mandatory -O0 for
+        # AWS-LC jitterentropy on arm64. The bridge does not require that
+        # optional secondary entropy source for its non-FIPS TLS client.
+        "AWS_LC_SYS_NO_JITTER_ENTROPY=1"
         "CARGO_TARGET_DIR=${CARGO_TARGET_DIR}"
         "${RUSTUP_EXECUTABLE}" run "${RUST_TOOLCHAIN}" cargo build
         --release
