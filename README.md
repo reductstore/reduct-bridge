@@ -81,9 +81,9 @@ Published packages and Docker images are split into these build types so each ar
 
 | Build type | Description | Included inputs | Published artifact names |
 | --- | --- | --- | --- |
-| `ros1` | ROS1 robotics bundle. | [ROS1](src/input/ros1/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-ros1`; Docker build type: `ros1`; binary: `bridge-ros1.x86_64-unknown-linux-gnu.tar.gz` |
-| `ros2` | ROS2 robotics bundle. | [ROS2](src/input/ros2/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-ros2`; Docker build types: `ros2-jazzy`, `ros2-lyrical`, `ros2-humble`; binaries: `bridge-ros2-jazzy.x86_64-unknown-linux-gnu.tar.gz`, `bridge-ros2-lyrical.x86_64-unknown-linux-gnu.tar.gz`, `bridge-ros2-humble.x86_64-unknown-linux-gnu.tar.gz` |
-| `iot` | HTTP/MQTT IIoT bundle. | [HTTP](src/input/http/README.md), [MQTT](src/input/mqtt/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-iot`; Docker build type: `iot`; binary: `bridge-iot.x86_64-unknown-linux-gnu.tar.gz` |
+| `ros1` | ROS1 robotics bundle. | [ROS1](src/input/ros1/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-ros1`; Docker build type: `ros1`; binaries: `bridge-ros1.x86_64-unknown-linux-gnu.tar.gz`, `bridge-ros1.aarch64-unknown-linux-gnu.tar.gz` |
+| `ros2` | ROS2 robotics bundle. | [ROS2](src/input/ros2/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-ros2`; Docker build types: `ros2-jazzy`, `ros2-lyrical`, `ros2-humble`; binaries: `bridge-ros2-jazzy.{x86_64,aarch64}-unknown-linux-gnu.tar.gz`, `bridge-ros2-lyrical.x86_64-unknown-linux-gnu.tar.gz`, `bridge-ros2-humble.{x86_64,aarch64}-unknown-linux-gnu.tar.gz` |
+| `iot` | HTTP/MQTT IIoT bundle. | [HTTP](src/input/http/README.md), [MQTT](src/input/mqtt/README.md), [Shell](src/input/shell/README.md), [Metrics](src/input/metrics/README.md) | Snap: `reduct-bridge-iot`; Docker build type: `iot`; binaries: `bridge-iot.x86_64-unknown-linux-gnu.tar.gz`, `bridge-iot.aarch64-unknown-linux-gnu.tar.gz` |
 
 Note: ROS2 binary and Docker artifacts are published per ROS distribution: `ros2-jazzy`, `ros2-lyrical`, and `ros2-humble`. The ROS2 snap is published as `reduct-bridge-ros2` and currently uses the Jazzy build.
 
