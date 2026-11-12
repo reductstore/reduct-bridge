@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.5.7 - 2026-11-12
+
 ### Added
 
 - Linux arm64 release binaries for the ROS 1, ROS 2 Jazzy, ROS 2 Humble, and IoT bundles, [PR-75](https://github.com/reductstore/reduct-bridge/pull/75).
