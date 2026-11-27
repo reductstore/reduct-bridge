@@ -89,6 +89,22 @@ Note: ROS2 binary and Docker artifacts are published per ROS distribution: `ros2
 
 Input names in configuration use their input table names, for example `[inputs.ros.*]`, `[inputs.ros2.*]`, `[inputs.mqtt.*]`, `[inputs.shell.*]`, and `[inputs.metrics.*]`.
 
+### ROS 2 apt
+
+The official ROS 2 apt repository must already be configured. Packages are available for Humble, Jazzy, and Lyrical.
+
+```bash
+sudo apt update
+sudo apt install ros-${ROS_DISTRO}-reduct-bridge
+```
+
+Source the ROS environment and run ReductBridge with your configuration file:
+
+```bash
+source /opt/ros/${ROS_DISTRO}/setup.bash
+ros2 run reduct_bridge reduct-bridge /path/to/config.toml
+```
+
 ### Docker
 
 Docker images are published as `reduct/bridge:<tag>`, where `<tag>` combines a release channel or version with the build type.
